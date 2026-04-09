@@ -1,0 +1,6 @@
+zas/admin/zia/translation/ZiaTranslationApplicationTests.class
+zas/admin/zia/translation/service/pdf/PdfGenerationServiceTest.class
+zas/admin/zia/translation/service/parser/PdfDocumentParserTest.class
+zas/admin/zia/translation/service/llm/TextTranslationServiceTest.class
+zas/admin/zia/translation/service/controller/TranslationControllerTest.class
+zas/admin/zia/translation/service/ocr/OcrExtractionServiceTest.class

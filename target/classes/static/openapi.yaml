@@ -1,0 +1,141 @@
+openapi: 3.1.0
+info:
+  title: ZIA Translation Service
+  description: >
+    Service de traduction de documents. Accepte un fichier PDF en entrée,
+    en extrait le texte via OCR (modèle vision), et le traduit via un LLM.
+    Retourne soit un PDF traduit, soit le texte traduit page par page.
+  version: 0.0.1
+
+servers:
+  - url: /api/translation
+    description: Translation API base path
+
+paths:
+  /pdf:
+    post:
+      summary: Translate a PDF document and return a translated PDF
+      operationId: translateToPdf
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - targetLanguage
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source PDF document
+                targetLanguage:
+                  type: string
+                  description: Target language code (e.g. fr, en, de)
+      responses:
+        '200':
+          description: Translated PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable entity — OCR or translation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /text:
+    post:
+      summary: Translate a PDF document and return translated text page by page
+      operationId: translateToText
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - targetLanguage
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source PDF document
+                targetLanguage:
+                  type: string
+                  description: Target language code (e.g. fr, en, de)
+      responses:
+        '200':
+          description: Translated text, one entry per source page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationTextResponse'
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable entity — OCR or translation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    TranslationTextResponse:
+      type: object
+      description: Response body for the /api/translation/text endpoint
+      required:
+        - pages
+      properties:
+        pages:
+          type: array
+          description: Translated text for each page of the source document
+          items:
+            type: string
+
+    ErrorResponse:
+      type: object
+      description: Uniform error response body
+      required:
+        - status
+        - message
+        - timestamp
+      properties:
+        status:
+          type: integer
+          description: HTTP status code
+        message:
+          type: string
+          description: Human-readable error description
+        timestamp:
+          type: string
+          format: date-time
+          description: Time at which the error occurred (ISO-8601)

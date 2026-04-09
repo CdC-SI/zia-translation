@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: zas.admin.zia.translation.service.controller.TranslationControllerTest
+-------------------------------------------------------------------------------
+Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.726 s -- in zas.admin.zia.translation.service.controller.TranslationControllerTest
