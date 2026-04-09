@@ -1,6 +1,0 @@
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/ZiaTranslationApplicationTests.java
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/service/controller/TranslationControllerTest.java
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/service/llm/TextTranslationServiceTest.java
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/service/ocr/OcrExtractionServiceTest.java
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/service/parser/PdfDocumentParserTest.java
-/home/runner/work/zia-translation/zia-translation/src/test/java/zas/admin/zia/translation/service/pdf/PdfGenerationServiceTest.java

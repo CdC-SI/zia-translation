@@ -1,4 +1,0 @@
--------------------------------------------------------------------------------
-Test set: zas.admin.zia.translation.service.pdf.PdfGenerationServiceTest
--------------------------------------------------------------------------------
-Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.051 s -- in zas.admin.zia.translation.service.pdf.PdfGenerationServiceTest
