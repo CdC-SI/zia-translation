@@ -48,8 +48,13 @@ public class TranslationService {
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
         byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file);
-        List<byte[]> pages = parser.renderPages(bytes);
+        DocumentParser parser = resolveParser(file, bytes);
+        List<byte[]> pages;
+        try {
+            pages = parser.renderPages(bytes);
+        } catch (IOException exception) {
+            throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
+        }
         return translatePages(pages, targetLanguage);
     }
 
@@ -59,11 +64,17 @@ public class TranslationService {
     }
 
     private List<String> translatePages(List<byte[]> pages, String targetLanguage) {
-        if (STRATEGY_SINGLE.equals(strategy)) {
-            return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage);
+        try {
+            if (STRATEGY_SINGLE.equals(strategy)) {
+                return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage);
+            }
+            List<String> extracted = ocrService.extractText(pages);
+            return textTranslationService.translatePages(extracted, targetLanguage);
+        } catch (TranslationProcessingException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new TranslationProcessingException("Failed to process document translation.", ex);
         }
-        List<String> extracted = ocrService.extractText(pages);
-        return textTranslationService.translatePages(extracted, targetLanguage);
     }
 
     private byte[] validateAndRead(MultipartFile file) throws IOException {
@@ -78,7 +89,7 @@ public class TranslationService {
         return bytes;
     }
 
-    private DocumentParser resolveParser(MultipartFile file) {
+    private DocumentParser resolveParser(MultipartFile file, byte[] bytes) {
         String contentType = file.getContentType();
         DocumentParser parser = null;
         if (contentType != null) {
@@ -86,13 +97,8 @@ public class TranslationService {
         }
         if (parser == null) {
             // fallback: check magic bytes
-            try {
-                byte[] bytes = file.getBytes();
-                if (isPdf(bytes)) {
-                    parser = parsersByMimeType.get(PDF_MIME_TYPE);
-                }
-            } catch (IOException ignored) {
-                // handled below
+            if (isPdf(bytes)) {
+                parser = parsersByMimeType.get(PDF_MIME_TYPE);
             }
         }
         if (parser == null) {

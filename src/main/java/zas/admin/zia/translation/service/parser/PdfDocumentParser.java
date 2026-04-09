@@ -27,7 +27,10 @@ class PdfDocumentParser implements DocumentParser {
             for (int i = 0; i < pageCount; i++) {
                 BufferedImage image = renderer.renderImageWithDPI(i, RENDER_DPI);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                ImageIO.write(image, "PNG", out);
+                boolean written = ImageIO.write(image, "PNG", out);
+                if (!written) {
+                    throw new IOException("No suitable ImageIO writer found for PNG rendering on page " + (i + 1));
+                }
                 pages.add(out.toByteArray());
             }
             return pages;

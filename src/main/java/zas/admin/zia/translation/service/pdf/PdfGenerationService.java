@@ -82,15 +82,11 @@ public class PdfGenerationService {
             if (c < 0x20 && c != '\t') {
                 continue;
             }
-            try {
-                // Attempt to encode; PDType1Font uses WinAnsiEncoding (Latin-1 range)
-                if (c > 0xFF) {
-                    sb.append('?');
-                } else {
-                    sb.append(c);
-                }
-            } catch (Exception e) {
+            // PDType1Font uses WinAnsiEncoding (Latin-1 range)
+            if (c > 0xFF) {
                 sb.append('?');
+            } else {
+                sb.append(c);
             }
         }
         return sb.toString();
