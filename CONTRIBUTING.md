@@ -101,10 +101,9 @@ Description des entités/DTOs.
 
 ## Conventions de code
 
-- **Java 25** — utiliser les fonctionnalités modernes (records, pattern matching, sealed classes)
+- **Java 21** — utiliser les fonctionnalités modernes (records, pattern matching, sealed classes)
 - **Pas de Lombok**
 - **Visibilité package-private** par défaut (pas de `public` sauf nécessité)
 - **Records** pour les DTOs et objets de valeur
 - **Tests obligatoires** pour toute nouvelle feature
 - **`mvn clean verify`** doit passer avant toute PR
-

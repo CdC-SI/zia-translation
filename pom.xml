@@ -15,7 +15,7 @@
     <name>zia-translation</name>
 
     <properties>
-        <java.version>25</java.version>
+        <java.version>21</java.version>
         <spring-ai.version>1.1.4</spring-ai.version>
     </properties>
 

@@ -2,14 +2,14 @@
 
 ## Contexte projet
 
-Ce projet est un service de traduction Spring Boot 4 (Java 25, Maven).
+Ce projet est un service de traduction Spring Boot 4 (Java 21, Maven).
 Package racine : `zas.admin.zia.translation`
 
 ## Architecture & Conventions
 
 - **Framework** : Spring Boot 4.0.x avec spring-boot-starter-webmvc
 - **Build** : Maven (pas Gradle)
-- **Java** : 25 (utiliser les fonctionnalités modernes du langage quand pertinent : records, pattern matching, sealed classes, etc.)
+- **Java** : 21 (utiliser les fonctionnalités modernes du langage quand pertinent : records, pattern matching, sealed classes, etc.)
 - **Package convention** : `zas.admin.zia.translation.<module>`
 - **Tests** : Obligatoires pour toute nouvelle feature. Utiliser `spring-boot-starter-webmvc-test` et `spring-boot-starter-actuator-test`.
 - **Style** :
@@ -43,4 +43,3 @@ Le fichier spec.md décrit la feature de façon détaillée (contexte, API, mod�
 5. S'assurer que `mvn clean verify` passe sans erreur
 6. Créer une PR vers `develop` avec un résumé de l'implémentation
 7. Référencer le fichier de spec dans la description de la PR
-
