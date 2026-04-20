@@ -71,6 +71,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>zas.admin.zia.translation.ZiaTranslationApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>
