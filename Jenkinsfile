@@ -1,12 +1,11 @@
-@Library('zas-pipelinelibrary') _
+@Library('phenix-pipeline-library') _
 
-mavenPipelineTemplate {
-    node = 'java-21'
-    dockerConfig = [imageRoot: 'zas/copilot', imageName: 'translation-service']
-    email = [recipients: 'matthieu.vinciarelli@zas.admin.ch']
-    uploadArtefact = 'true'
-    triggerDevPromotion = [
-        repositoryName: 'copilot-ocp-promote',
-        versionProperty: 'translation-service.image.version'
+mavenDockerBuild{
+    displayParameters=true
+    jdk='jdk21(x64)'
+    dockerConfig = [imageRoot: 'zas/copilot', imageName: 'translation-service', buildParams: [HTTP_PROXY: this.env.HTTP_PROXY_OCP, HTTPS_PROXY: this.env.HTTP_PROXY_OCP, no_proxy: this.env.NO_PROXY], options: ['--rm'],
+                    stash : ['**/Dockerfile','**/target/**','**/delivery/**']
     ]
+    email = [recipients: '']
+    triggerDevPromotion = [ repositoryName : 'copilot-ocp-promote', versionProperty: 'translation-service.image.version' ]
 }
