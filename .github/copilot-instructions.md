@@ -2,16 +2,16 @@
 
 ## Contexte projet
 
-Ce projet est un service de traduction Spring Boot 4 (Java 21, Maven).
+Ce projet est un service de traduction Spring Boot 3 (Java 21, Maven).
 Package racine : `zas.admin.zia.translation`
 
 ## Architecture & Conventions
 
-- **Framework** : Spring Boot 4.0.x avec spring-boot-starter-webmvc
+- **Framework** : Spring Boot 3.5.x avec spring-boot-starter-web
 - **Build** : Maven (pas Gradle)
 - **Java** : 21 (utiliser les fonctionnalités modernes du langage quand pertinent : records, pattern matching, sealed classes, etc.)
 - **Package convention** : `zas.admin.zia.translation.<module>`
-- **Tests** : Obligatoires pour toute nouvelle feature. Utiliser `spring-boot-starter-webmvc-test` et `spring-boot-starter-actuator-test`.
+- **Tests** : Obligatoires pour toute nouvelle feature. Utiliser `spring-boot-starter-test`.
 - **Style** :
   - Pas de Lombok
   - Classes utilitaires avec constructeur privé
