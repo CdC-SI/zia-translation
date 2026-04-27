@@ -9,6 +9,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.parser.DocumentParser;
+import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 
 import java.io.IOException;
@@ -198,9 +199,10 @@ class TranslationServiceTest {
     void translateToPdf_delegatesToGenerationService() throws IOException {
         byte[] pdfOutput = new byte[]{1, 2, 3};
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
         when(textTranslationService.translatePages(any(), anyString())).thenReturn(List.of("translated"));
-        when(pdfGenerationService.generatePdf(any())).thenReturn(pdfOutput);
+        when(pdfGenerationService.generatePdf(any(List.class), any(List.class))).thenReturn(pdfOutput);
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 

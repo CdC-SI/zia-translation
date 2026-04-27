@@ -19,4 +19,13 @@ public interface DocumentParser {
      * Returns the MIME type supported by this parser (e.g. "application/pdf").
      */
     String supportedMimeType();
+
+    /**
+     * Extracts the page dimensions from the document.
+     *
+     * @param documentBytes raw bytes of the source document
+     * @return list of page layouts — one entry per page
+     * @throws IOException if the document cannot be parsed
+     */
+    List<PageLayout> extractPageLayouts(byte[] documentBytes) throws IOException;
 }

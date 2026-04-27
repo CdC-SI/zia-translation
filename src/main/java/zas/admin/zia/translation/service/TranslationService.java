@@ -6,6 +6,7 @@ import org.springframework.web.multipart.MultipartFile;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.parser.DocumentParser;
+import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 
 import java.io.IOException;
@@ -59,8 +60,16 @@ public class TranslationService {
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
+        byte[] bytes = validateAndRead(file);
+        DocumentParser parser = resolveParser(file, bytes);
+        List<PageLayout> pageLayouts;
+        try {
+            pageLayouts = parser.extractPageLayouts(bytes);
+        } catch (IOException exception) {
+            throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
+        }
         List<String> translatedPages = translateToText(file, targetLanguage);
-        return pdfGenerationService.generatePdf(translatedPages);
+        return pdfGenerationService.generatePdf(translatedPages, pageLayouts);
     }
 
     private List<String> translatePages(List<byte[]> pages, String targetLanguage) {
