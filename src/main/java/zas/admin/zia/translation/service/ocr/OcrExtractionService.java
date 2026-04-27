@@ -15,8 +15,12 @@ import java.util.List;
 public class OcrExtractionService {
 
     private static final String OCR_PROMPT =
-            "Extract all the text from this image exactly as it appears. " +
-            "Return only the extracted text, without any commentary or formatting.";
+            """
+            Extract all the text from this image exactly as it appears.
+            Preserve the document structure using Markdown: use headings (#, ##, etc.) for titles,
+            pipe-delimited tables (| col1 | col2 |) for tabular data, and bullet lists (- item) for lists.
+            Return only the extracted text in Markdown format, without any commentary.
+            """;
 
     private final ChatClient visionClient;
 

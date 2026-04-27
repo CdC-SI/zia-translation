@@ -2,6 +2,7 @@ package zas.admin.zia.translation.service.parser;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.stereotype.Component;
 
@@ -27,7 +28,7 @@ class PdfDocumentParser implements DocumentParser {
             for (int i = 0; i < pageCount; i++) {
                 BufferedImage image = renderer.renderImageWithDPI(i, RENDER_DPI);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                boolean written = ImageIO.write(image, "PNG", out);
+                boolean written = ImageIO.write(image, "png", out);
                 if (!written) {
                     throw new IOException("No suitable ImageIO writer found for PNG rendering on page " + (i + 1));
                 }
@@ -40,5 +41,18 @@ class PdfDocumentParser implements DocumentParser {
     @Override
     public String supportedMimeType() {
         return SUPPORTED_MIME_TYPE;
+    }
+
+    @Override
+    public List<PageLayout> extractPageLayouts(byte[] documentBytes) throws IOException {
+        try (PDDocument document = Loader.loadPDF(documentBytes)) {
+            int pageCount = document.getNumberOfPages();
+            List<PageLayout> layouts = new ArrayList<>(pageCount);
+            for (int i = 0; i < pageCount; i++) {
+                PDRectangle mediaBox = document.getPage(i).getMediaBox();
+                layouts.add(new PageLayout(mediaBox.getWidth(), mediaBox.getHeight()));
+            }
+            return layouts;
+        }
     }
 }

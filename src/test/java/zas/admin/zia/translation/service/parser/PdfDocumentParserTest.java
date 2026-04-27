@@ -3,6 +3,7 @@ package zas.admin.zia.translation.service.parser;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.junit.jupiter.api.Test;
@@ -49,6 +50,24 @@ class PdfDocumentParserTest {
         assertThat(pageBytes[3]).isEqualTo((byte) 0x47); // 'G'
     }
 
+    @Test
+    void extractPageLayouts_returnsCorrectDimensions() throws IOException {
+        byte[] pdfBytes = createMinimalPdf(2);
+        List<PageLayout> layouts = parser.extractPageLayouts(pdfBytes);
+        assertThat(layouts).hasSize(2);
+        // Default PDPage uses US Letter (612 x 792)
+        assertThat(layouts.getFirst().widthPt()).isEqualTo(612f);
+        assertThat(layouts.getFirst().heightPt()).isEqualTo(792f);
+    }
+
+    @Test
+    void extractPageLayouts_landscapePage_detectsLandscape() throws IOException {
+        byte[] pdfBytes = createLandscapePdf();
+        List<PageLayout> layouts = parser.extractPageLayouts(pdfBytes);
+        assertThat(layouts).hasSize(1);
+        assertThat(layouts.getFirst().isLandscape()).isTrue();
+    }
+
     private static byte[] createMinimalPdf(int pageCount) throws IOException {
         try (PDDocument doc = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) {
@@ -61,6 +80,23 @@ class PdfDocumentParserTest {
                     cs.showText("Page " + (i + 1));
                     cs.endText();
                 }
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] createLandscapePdf() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage(new PDRectangle(PDRectangle.A4.getHeight(), PDRectangle.A4.getWidth()));
+            doc.addPage(page);
+            try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                cs.beginText();
+                cs.newLineAtOffset(50, 400);
+                cs.showText("Landscape page");
+                cs.endText();
             }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);

@@ -15,12 +15,20 @@ import java.util.List;
 public class TextTranslationService {
 
     private static final String TRANSLATE_PROMPT_TEMPLATE =
-            "Translate the following text to %s. " +
-            "Return only the translated text, without any commentary or additional explanation.\n\n%s";
+            """
+            Translate the following text to %s.
+            Preserve all Markdown formatting (headings, tables, lists) exactly as-is.
+            Return only the translated text, without any commentary or additional explanation.
+            
+            %s
+            """;
 
     private static final String SINGLE_STRATEGY_PROMPT_TEMPLATE =
-            "Extract all the text from this image and translate it to %s. " +
-            "Return only the translated text, without any commentary or additional explanation.";
+            """
+            Extract all the text from this image and translate it to %s.
+            Preserve the document structure using Markdown: headings (#, ##), tables (| col |), bullet lists (- item).
+            Return only the translated text in Markdown format, without any commentary or additional explanation.
+            """;
 
     private final ChatClient llmClient;
     private final ChatClient visionClient;
