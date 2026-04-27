@@ -1,5 +1,7 @@
 package zas.admin.zia.translation.service.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +20,7 @@ import java.util.List;
 @RequestMapping("/api/translation")
 class TranslationController {
 
+    private static final Logger log = LoggerFactory.getLogger(TranslationController.class);
     private final TranslationService translationService;
 
     TranslationController(TranslationService translationService) {
@@ -28,6 +31,8 @@ class TranslationController {
     ResponseEntity<byte[]> translateToPdf(
             @RequestParam("file") MultipartFile file,
             @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+
+        log.info("Received request to translate file '{}' to language '{}'", file.getOriginalFilename(), targetLanguage);
 
         byte[] pdfBytes = translationService.translateToPdf(file, targetLanguage);
 
@@ -41,6 +46,8 @@ class TranslationController {
     ResponseEntity<TranslationTextResponse> translateToText(
             @RequestParam("file") MultipartFile file,
             @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+
+        log.info("Received request to translate file '{}' to text in language '{}'", file.getOriginalFilename(), targetLanguage);
 
         List<String> pages = translationService.translateToText(file, targetLanguage);
         return ResponseEntity.ok(new TranslationTextResponse(pages));
