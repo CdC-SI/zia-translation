@@ -68,6 +68,19 @@
         </dependency>
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>internal</id>
+            <dependencies>
+                <dependency>
+                    <groupId>ch.admin.zas.commons</groupId>
+                    <artifactId>zas-common-security-starter</artifactId>
+                    <version>3.5.8</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
     <build>
         <finalName>zia-translation</finalName>
         <resources>
