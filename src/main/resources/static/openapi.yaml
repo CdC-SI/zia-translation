@@ -4,7 +4,7 @@ info:
   description: >
     Service de traduction de documents. Accepte un fichier PDF en entrée,
     en extrait le texte via OCR (modèle vision), et le traduit via un LLM.
-    Retourne soit un PDF traduit, soit le texte traduit page par page.
+    Retourne soit un job PDF asynchrone, soit un flux SSE de pages traduites.
   version: 0.0.1
 
 servers:
@@ -14,7 +14,7 @@ servers:
 paths:
   /pdf:
     post:
-      summary: Translate a PDF document and return a translated PDF
+      summary: Submit an async PDF translation job
       operationId: translateToPdf
       requestBody:
         required: true
@@ -34,6 +34,50 @@ paths:
                   type: string
                   description: Target language code (e.g. fr, en, de)
       responses:
+        '202':
+          description: Translation job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /pdf/{jobId}/status:
+    get:
+      summary: Get async PDF translation job status
+      operationId: getPdfTranslationJobStatus
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Current job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '404':
+          description: Unknown job identifier
+
+  /pdf/{jobId}:
+    get:
+      summary: Download translated PDF when async job is complete
+      operationId: downloadTranslatedPdf
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+      responses:
         '200':
           description: Translated PDF document
           content:
@@ -41,28 +85,18 @@ paths:
               schema:
                 type: string
                 format: binary
-        '400':
-          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Unknown job identifier
+        '409':
+          description: Job is not completed yet (PENDING or PROCESSING)
+        '410':
+          description: Translated PDF file has expired and was cleaned up
         '422':
-          description: Unprocessable entity — OCR or translation failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+          description: Job failed during processing
 
   /text:
     post:
-      summary: Translate a PDF document and return translated text page by page
+      summary: Translate a PDF document and stream translated pages as SSE
       operationId: translateToText
       requestBody:
         required: true
@@ -83,25 +117,22 @@ paths:
                   description: Target language code (e.g. fr, en, de)
       responses:
         '200':
-          description: Translated text, one entry per source page
+          description: >
+            Server-Sent Events stream. Emits `page` events with TranslationPageEvent payload,
+            then a `complete` event with TranslationCompleteEvent payload. Emits `error`
+            with a message payload if processing fails mid-stream.
           content:
-            application/json:
+            text/event-stream:
               schema:
-                $ref: '#/components/schemas/TranslationTextResponse'
+                type: string
+                example: |
+                  event: page
+                  data: {"pageNumber":1,"text":"Texte traduit de la page 1..."}
+
+                  event: complete
+                  data: {"totalPages":1}
         '400':
           description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: Unprocessable entity — OCR or translation failure
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '500':
-          description: Internal server error
           content:
             application/json:
               schema:
@@ -109,17 +140,44 @@ paths:
 
 components:
   schemas:
-    TranslationTextResponse:
+    TranslationJobResponse:
       type: object
-      description: Response body for the /api/translation/text endpoint
       required:
-        - pages
+        - jobId
+        - status
       properties:
-        pages:
-          type: array
-          description: Translated text for each page of the source document
-          items:
-            type: string
+        jobId:
+          type: string
+          description: UUID v4 of the async translation job
+        status:
+          $ref: '#/components/schemas/JobStatus'
+
+    JobStatus:
+      type: string
+      enum:
+        - PENDING
+        - PROCESSING
+        - COMPLETED
+        - FAILED
+
+    TranslationPageEvent:
+      type: object
+      required:
+        - pageNumber
+        - text
+      properties:
+        pageNumber:
+          type: integer
+        text:
+          type: string
+
+    TranslationCompleteEvent:
+      type: object
+      required:
+        - totalPages
+      properties:
+        totalPages:
+          type: integer
 
     ErrorResponse:
       type: object

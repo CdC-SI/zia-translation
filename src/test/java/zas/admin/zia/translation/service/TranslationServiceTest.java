@@ -8,9 +8,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
+import zas.admin.zia.translation.service.job.TranslationJobStore;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
+import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
 import java.util.List;
@@ -37,6 +39,10 @@ class TranslationServiceTest {
 
     @Mock
     private PdfGenerationService pdfGenerationService;
+    @Mock
+    private TranslationJobStore translationJobStore;
+    @Mock
+    private PdfStorageService pdfStorageService;
 
     private TranslationService dualService;
     private TranslationService singleService;
@@ -47,10 +53,12 @@ class TranslationServiceTest {
 
         dualService = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "10MB");
 
         singleService = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_SINGLE, "10MB");
     }
 
@@ -76,6 +84,7 @@ class TranslationServiceTest {
     void translateToText_fileTooLarge_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "1KB");
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
