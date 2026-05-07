@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.TranslationService;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
@@ -105,10 +107,13 @@ class TranslationController {
 
         return pageEvents
                 .concatWith(completeEvent)
-                .onErrorResume(exception -> Mono.just(ServerSentEvent.<String>builder()
-                        .event("error")
-                        .data(toJson(Map.of("message", resolveErrorMessage(exception))))
-                        .build()));
+                .onErrorResume(exception -> {
+                    log.error("SSE translation stream failed", exception);
+                    return Mono.just(ServerSentEvent.<String>builder()
+                            .event("error")
+                            .data(toJson(Map.of("message", resolveErrorMessage(exception))))
+                            .build());
+                });
     }
 
     private ServerSentEvent<String> toPageEvent(AtomicInteger totalPages, TranslationPageEvent pageEvent) {
@@ -128,9 +133,9 @@ class TranslationController {
     }
 
     private String resolveErrorMessage(Throwable throwable) {
-        if (throwable.getMessage() == null || throwable.getMessage().isBlank()) {
+        if (throwable instanceof InvalidDocumentException || throwable instanceof TranslationProcessingException) {
             return "Translation processing failed.";
         }
-        return throwable.getMessage();
+        return "Unexpected error during streaming.";
     }
 }

@@ -24,7 +24,7 @@ class JobCleanupScheduler {
         this.jobTtl = jobTtl;
     }
 
-    @Scheduled(fixedDelay = 600000)
+    @Scheduled(fixedDelayString = "${zia.translation.pdf.cleanup-interval:10m}")
     void cleanupExpiredJobs() {
         translationJobStore.findExpired(jobTtl, Instant.now()).forEach(job -> {
             pdfStorageService.delete(job.jobId());

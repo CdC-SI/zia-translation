@@ -143,7 +143,7 @@ class TranslationControllerTest {
                         .param("targetLanguage", "fr"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("event:error")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("OCR extraction failed on page 3")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Unexpected error during streaming.")));
     }
 
     @Test
