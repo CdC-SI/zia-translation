@@ -22,9 +22,6 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required:
-                - file
-                - targetLanguage
               properties:
                 file:
                   type: string
@@ -104,9 +101,6 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required:
-                - file
-                - targetLanguage
               properties:
                 file:
                   type: string
@@ -125,12 +119,15 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                example: |
-                  event: page
-                  data: {"pageNumber":1,"text":"Texte traduit de la page 1..."}
+              examples:
+                pageAndComplete:
+                  summary: Example stream sequence
+                  value: |
+                    event: page
+                    data: {"pageNumber":1,"text":"Texte traduit de la page 1..."}
 
-                  event: complete
-                  data: {"totalPages":1}
+                    event: complete
+                    data: {"totalPages":1}
         '400':
           description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
           content:

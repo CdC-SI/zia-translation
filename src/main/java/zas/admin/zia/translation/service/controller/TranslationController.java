@@ -59,14 +59,14 @@ class TranslationController {
 
     @GetMapping("/pdf/{jobId}/status")
     ResponseEntity<TranslationJobResponse> getJobStatus(@PathVariable String jobId) {
-        return translationService.getJobStatus(jobId)
+        return translationService.getJobStatusResponse(jobId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/pdf/{jobId}")
     ResponseEntity<Resource> downloadPdf(@PathVariable String jobId) {
-        JobStatus status = translationService.getJobState(jobId).orElse(null);
+        JobStatus status = translationService.getJobStatus(jobId).orElse(null);
 
         if (status == null) {
             return ResponseEntity.notFound().build();

@@ -59,7 +59,7 @@ class TranslationControllerTest {
 
     @Test
     void getJobStatus_knownJob_returnsStatus() throws Exception {
-        when(translationService.getJobStatus("job-123"))
+        when(translationService.getJobStatusResponse("job-123"))
                 .thenReturn(Optional.of(new TranslationJobResponse("job-123", JobStatus.PROCESSING)));
 
         mockMvc.perform(get("/api/translation/pdf/job-123/status"))
@@ -70,7 +70,7 @@ class TranslationControllerTest {
 
     @Test
     void getJobStatus_unknownJob_returns404() throws Exception {
-        when(translationService.getJobStatus("missing")).thenReturn(Optional.empty());
+        when(translationService.getJobStatusResponse("missing")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/translation/pdf/missing/status"))
                 .andExpect(status().isNotFound());
@@ -78,7 +78,7 @@ class TranslationControllerTest {
 
     @Test
     void downloadPdf_processingJob_returns409() throws Exception {
-        when(translationService.getJobState("job-1")).thenReturn(Optional.of(JobStatus.PROCESSING));
+        when(translationService.getJobStatus("job-1")).thenReturn(Optional.of(JobStatus.PROCESSING));
 
         mockMvc.perform(get("/api/translation/pdf/job-1"))
                 .andExpect(status().isConflict());
@@ -87,7 +87,7 @@ class TranslationControllerTest {
     @Test
     void downloadPdf_completedJob_returnsPdf() throws Exception {
         byte[] pdfBytes = "%PDF-1.4".getBytes();
-        when(translationService.getJobState("job-2")).thenReturn(Optional.of(JobStatus.COMPLETED));
+        when(translationService.getJobStatus("job-2")).thenReturn(Optional.of(JobStatus.COMPLETED));
         when(translationService.getTranslatedPdf("job-2")).thenReturn(Optional.of(new ByteArrayResource(pdfBytes)));
 
         mockMvc.perform(get("/api/translation/pdf/job-2"))
@@ -98,7 +98,7 @@ class TranslationControllerTest {
 
     @Test
     void downloadPdf_completedButMissingFile_returns410() throws Exception {
-        when(translationService.getJobState("job-3")).thenReturn(Optional.of(JobStatus.COMPLETED));
+        when(translationService.getJobStatus("job-3")).thenReturn(Optional.of(JobStatus.COMPLETED));
         when(translationService.getTranslatedPdf("job-3")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/translation/pdf/job-3"))
@@ -107,7 +107,7 @@ class TranslationControllerTest {
 
     @Test
     void downloadPdf_failedJob_returns422() throws Exception {
-        when(translationService.getJobState("job-4")).thenReturn(Optional.of(JobStatus.FAILED));
+        when(translationService.getJobStatus("job-4")).thenReturn(Optional.of(JobStatus.FAILED));
 
         mockMvc.perform(get("/api/translation/pdf/job-4"))
                 .andExpect(status().isUnprocessableEntity());

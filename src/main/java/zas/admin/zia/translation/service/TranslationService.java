@@ -81,11 +81,11 @@ public class TranslationService {
         return toResponse(job);
     }
 
-    public Optional<TranslationJobResponse> getJobStatus(String jobId) {
+    public Optional<TranslationJobResponse> getJobStatusResponse(String jobId) {
         return translationJobStore.findById(jobId).map(this::toResponse);
     }
 
-    public Optional<JobStatus> getJobState(String jobId) {
+    public Optional<JobStatus> getJobStatus(String jobId) {
         return translationJobStore.findById(jobId).map(TranslationJob::status);
     }
 
@@ -95,14 +95,7 @@ public class TranslationService {
 
     public Flux<TranslationPageEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
-        byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
-        List<byte[]> pages;
-        try {
-            pages = parser.renderPages(bytes);
-        } catch (IOException exception) {
-            throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
-        }
+        List<byte[]> pages = extractPages(file);
 
         return Flux.range(0, pages.size())
                 .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage))
@@ -111,15 +104,7 @@ public class TranslationService {
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
-        byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
-        List<byte[]> pages;
-        try {
-            pages = parser.renderPages(bytes);
-        } catch (IOException exception) {
-            throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
-        }
-        return translatePages(pages, targetLanguage);
+        return translatePages(extractPages(file), targetLanguage);
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
@@ -169,6 +154,16 @@ public class TranslationService {
 
     private String translatePage(byte[] page, String targetLanguage) {
         return translatePages(List.of(page), targetLanguage).getFirst();
+    }
+
+    private List<byte[]> extractPages(MultipartFile file) throws IOException {
+        byte[] bytes = validateAndRead(file);
+        DocumentParser parser = resolveParser(file, bytes);
+        try {
+            return parser.renderPages(bytes);
+        } catch (IOException exception) {
+            throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
+        }
     }
 
     private byte[] validateAndRead(MultipartFile file) throws IOException {
