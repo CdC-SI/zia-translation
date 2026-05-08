@@ -36,6 +36,7 @@ public class TextTranslationService {
     public TextTranslationService(
             @Qualifier("llmChatClient") ChatClient llmClient,
             @Qualifier("visionChatClient") ChatClient visionClient) {
+
         this.llmClient = llmClient;
         this.visionClient = visionClient;
     }
