@@ -23,11 +23,25 @@ public class TextTranslationService {
             %s
             """;
 
+    private static final String TRANSLATE_PLAIN_PROMPT_TEMPLATE =
+            """
+            Translate the following text to %s.
+            Return only the translated text, without any commentary, formatting, or additional explanation.
+            
+            %s
+            """;
+
     private static final String SINGLE_STRATEGY_PROMPT_TEMPLATE =
             """
             Extract all the text from this image and translate it to %s.
             Preserve the document structure using Markdown: headings (#, ##), tables (| col |), bullet lists (- item).
             Return only the translated text in Markdown format, without any commentary or additional explanation.
+            """;
+
+    private static final String SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE =
+            """
+            Extract all the text from this image and translate it to %s.
+            Return only the translated text, without any commentary, formatting, or additional explanation.
             """;
 
     private final ChatClient llmClient;
@@ -42,9 +56,14 @@ public class TextTranslationService {
     }
 
     public List<String> translatePages(List<String> extractedPages, String targetLanguage) {
+        return translatePages(extractedPages, targetLanguage, true);
+    }
+
+    public List<String> translatePages(List<String> extractedPages, String targetLanguage, boolean renderAsMarkdown) {
+        String template = renderAsMarkdown ? TRANSLATE_PROMPT_TEMPLATE : TRANSLATE_PLAIN_PROMPT_TEMPLATE;
         List<String> translated = new ArrayList<>(extractedPages.size());
         for (String pageText : extractedPages) {
-            String prompt = TRANSLATE_PROMPT_TEMPLATE.formatted(targetLanguage, pageText);
+            String prompt = template.formatted(targetLanguage, pageText);
             String result = llmClient.prompt()
                     .user(prompt)
                     .call()
@@ -55,9 +74,14 @@ public class TextTranslationService {
     }
 
     public List<String> translatePagesSingleStrategy(List<byte[]> pageImages, String targetLanguage) {
+        return translatePagesSingleStrategy(pageImages, targetLanguage, true);
+    }
+
+    public List<String> translatePagesSingleStrategy(List<byte[]> pageImages, String targetLanguage, boolean renderAsMarkdown) {
+        String promptTemplate = renderAsMarkdown ? SINGLE_STRATEGY_PROMPT_TEMPLATE : SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE;
         List<String> translated = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
-            String prompt = SINGLE_STRATEGY_PROMPT_TEMPLATE.formatted(targetLanguage);
+            String prompt = promptTemplate.formatted(targetLanguage);
             Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
             UserMessage message = UserMessage.builder()
                     .text(prompt)

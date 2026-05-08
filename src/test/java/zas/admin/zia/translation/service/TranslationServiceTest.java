@@ -117,7 +117,7 @@ class TranslationServiceTest {
     void translateToText_noContentTypeButPdfMagicBytes_resolvesParserSuccessfully() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString())).thenReturn(List.of("translated"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated"));
 
         MockMultipartFile file = new MockMultipartFile("file", "doc.pdf", null, PDF_BYTES);
 
@@ -158,7 +158,7 @@ class TranslationServiceTest {
     void translateToText_translationThrowsRuntimeException_throwsTranslationProcessingException() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted"));
-        when(textTranslationService.translatePages(any(), anyString())).thenThrow(new RuntimeException("LLM failure"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenThrow(new RuntimeException("LLM failure"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
@@ -186,7 +186,7 @@ class TranslationServiceTest {
     void translateToText_dualStrategy_callsOcrThenTranslate() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted text"));
-        when(textTranslationService.translatePages(any(), anyString())).thenReturn(List.of("translated text"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated text"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
@@ -198,7 +198,7 @@ class TranslationServiceTest {
     @Test
     void translateToText_singleStrategy_callsTranslatePagesSingleStrategy() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
-        when(textTranslationService.translatePagesSingleStrategy(any(), anyString()))
+        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(false)))
                 .thenReturn(List.of("single strategy result"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
@@ -216,7 +216,7 @@ class TranslationServiceTest {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString())).thenReturn(List.of("translated"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(true))).thenReturn(List.of("translated"));
         when(pdfGenerationService.generatePdf(any(List.class), any(List.class))).thenReturn(pdfOutput);
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
@@ -224,6 +224,36 @@ class TranslationServiceTest {
         byte[] result = dualService.translateToPdf(file, "fr");
 
         assertThat(result).isEqualTo(pdfOutput);
+    }
+
+    @Test
+    void translateToText_usesPlainTextTranslation_notMarkdown() throws IOException {
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("extracted text"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("plain text result"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        List<String> result = dualService.translateToText(file, "fr");
+
+        assertThat(result).containsExactly("plain text result");
+        verify(textTranslationService).translatePages(any(), anyString(), eq(false));
+    }
+
+    @Test
+    void translateToPdf_usesMarkdownTranslation() throws IOException {
+        byte[] pdfOutput = new byte[]{1, 2, 3};
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(true))).thenReturn(List.of("markdown result"));
+        when(pdfGenerationService.generatePdf(any(List.class), any(List.class))).thenReturn(pdfOutput);
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        dualService.translateToPdf(file, "fr");
+
+        verify(textTranslationService).translatePages(any(), anyString(), eq(true));
     }
 
     @Test

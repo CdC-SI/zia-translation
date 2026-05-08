@@ -106,14 +106,14 @@ public class TranslationService {
         return Mono.fromCallable(() -> extractPages(file))
                 .subscribeOn(translationScheduler)
                 .flatMapMany(pages -> Flux.range(0, pages.size())
-                        .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage))
+                        .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage, false))
                                 .subscribeOn(translationScheduler)
                                 .map(translatedText -> new TranslationPageEvent(index + 1, translatedText))));
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
-        return translatePages(extractPages(file), targetLanguage);
+        return translatePages(extractPages(file), targetLanguage, false);
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
@@ -128,7 +128,7 @@ public class TranslationService {
         } catch (IOException exception) {
             throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
         }
-        List<String> translatedPages = translatePages(pages, targetLanguage);
+        List<String> translatedPages = translatePages(pages, targetLanguage, true);
         return pdfGenerationService.generatePdf(translatedPages, pageLayouts);
     }
 
@@ -137,7 +137,7 @@ public class TranslationService {
         try {
             List<PageLayout> pageLayouts = parser.extractPageLayouts(bytes);
             List<byte[]> pages = parser.renderPages(bytes);
-            List<String> translatedPages = translatePages(pages, targetLanguage);
+            List<String> translatedPages = translatePages(pages, targetLanguage, true);
             byte[] generatedPdf = pdfGenerationService.generatePdf(translatedPages, pageLayouts);
             pdfStorageService.store(jobId, generatedPdf);
             translationJobStore.markCompleted(jobId);
@@ -147,13 +147,13 @@ public class TranslationService {
         }
     }
 
-    private List<String> translatePages(List<byte[]> pages, String targetLanguage) {
+    private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown) {
         try {
             if (STRATEGY_SINGLE.equals(strategy)) {
-                return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage);
+                return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage, renderAsMarkdown);
             }
             List<String> extracted = ocrService.extractText(pages);
-            return textTranslationService.translatePages(extracted, targetLanguage);
+            return textTranslationService.translatePages(extracted, targetLanguage, renderAsMarkdown);
         } catch (TranslationProcessingException ex) {
             throw ex;
         } catch (RuntimeException ex) {
@@ -161,8 +161,8 @@ public class TranslationService {
         }
     }
 
-    private String translatePage(byte[] page, String targetLanguage) {
-        return translatePages(List.of(page), targetLanguage).getFirst();
+    private String translatePage(byte[] page, String targetLanguage, boolean renderAsMarkdown) {
+        return translatePages(List.of(page), targetLanguage, renderAsMarkdown).getFirst();
     }
 
     private List<byte[]> extractPages(MultipartFile file) throws IOException {
