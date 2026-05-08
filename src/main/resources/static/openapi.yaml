@@ -145,6 +145,7 @@ components:
       properties:
         jobId:
           type: string
+          format: uuid
           description: UUID v4 of the async translation job
         status:
           $ref: '#/components/schemas/JobStatus'

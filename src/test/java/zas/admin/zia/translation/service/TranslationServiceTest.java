@@ -8,6 +8,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
+import zas.admin.zia.translation.service.job.JobStatus;
+import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.PageLayout;
@@ -15,12 +17,16 @@ import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -218,5 +224,20 @@ class TranslationServiceTest {
         byte[] result = dualService.translateToPdf(file, "fr");
 
         assertThat(result).isEqualTo(pdfOutput);
+    }
+
+    @Test
+    void submitPdfTranslation_processingFails_marksJobFailedWithSafeMessage() throws IOException {
+        when(translationJobStore.createPendingJob()).thenReturn(
+                new TranslationJob("123e4567-e89b-12d3-a456-426614174000", JobStatus.PENDING, Instant.now(), null, null));
+        when(pdfParser.extractPageLayouts(any())).thenThrow(new IOException("boom"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        dualService.submitPdfTranslation(file, "fr");
+
+        verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174000");
+        verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174000"), eq("PDF translation failed."));
+        verify(translationJobStore, never()).markCompleted(anyString());
     }
 }

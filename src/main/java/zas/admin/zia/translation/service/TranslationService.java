@@ -1,5 +1,7 @@
 package zas.admin.zia.translation.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -7,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationPageEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
@@ -31,8 +35,10 @@ import java.util.stream.Collectors;
 @Service
 public class TranslationService {
 
+    private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
     static final String STRATEGY_SINGLE = "single";
     static final String STRATEGY_DUAL = "dual";
+    private static final String PDF_TRANSLATION_FAILED_MESSAGE = "PDF translation failed.";
 
     private static final String PDF_MIME_TYPE = "application/pdf";
     private static final byte[] PDF_MAGIC = {'%', 'P', 'D', 'F'};
@@ -44,6 +50,7 @@ public class TranslationService {
     private final TranslationJobStore translationJobStore;
     private final PdfStorageService pdfStorageService;
     private final Executor translationTaskExecutor;
+    private final Scheduler translationScheduler;
     private final String strategy;
     private final long maxFileSizeBytes;
 
@@ -65,6 +72,7 @@ public class TranslationService {
         this.translationJobStore = translationJobStore;
         this.pdfStorageService = pdfStorageService;
         this.translationTaskExecutor = translationTaskExecutor;
+        this.translationScheduler = Schedulers.fromExecutor(translationTaskExecutor);
         this.strategy = strategy;
         this.maxFileSizeBytes = parseSize(maxFileSize);
     }
@@ -95,11 +103,12 @@ public class TranslationService {
 
     public Flux<TranslationPageEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
-        List<byte[]> pages = extractPages(file);
-
-        return Flux.range(0, pages.size())
-                .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage))
-                        .map(translatedText -> new TranslationPageEvent(index + 1, translatedText)));
+        return Mono.fromCallable(() -> extractPages(file))
+                .subscribeOn(translationScheduler)
+                .flatMapMany(pages -> Flux.range(0, pages.size())
+                        .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage))
+                                .subscribeOn(translationScheduler)
+                                .map(translatedText -> new TranslationPageEvent(index + 1, translatedText))));
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
@@ -133,8 +142,8 @@ public class TranslationService {
             pdfStorageService.store(jobId, generatedPdf);
             translationJobStore.markCompleted(jobId);
         } catch (Exception exception) {
-            String errorMessage = exception.getMessage() != null ? exception.getMessage() : "PDF translation failed.";
-            translationJobStore.markFailed(jobId, errorMessage);
+            log.error("PDF translation job failed for jobId={}", jobId, exception);
+            translationJobStore.markFailed(jobId, PDF_TRANSLATION_FAILED_MESSAGE);
         }
     }
 
