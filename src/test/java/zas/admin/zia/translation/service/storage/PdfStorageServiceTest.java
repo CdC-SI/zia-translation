@@ -18,14 +18,16 @@ class PdfStorageServiceTest {
         PdfStorageService service = new PdfStorageService(tempDir.toString());
         byte[] pdfContent = "%PDF-1.4".getBytes();
 
-        service.store("job-1", pdfContent);
+        String jobId = "123e4567-e89b-12d3-a456-426614174000";
 
-        assertThat(service.exists("job-1")).isTrue();
-        assertThat(service.load("job-1")).isPresent();
+        service.store(jobId, pdfContent);
 
-        service.delete("job-1");
+        assertThat(service.exists(jobId)).isTrue();
+        assertThat(service.load(jobId)).isPresent();
 
-        assertThat(service.exists("job-1")).isFalse();
-        assertThat(service.load("job-1")).isEmpty();
+        service.delete(jobId);
+
+        assertThat(service.exists(jobId)).isFalse();
+        assertThat(service.load(jobId)).isEmpty();
     }
 }
