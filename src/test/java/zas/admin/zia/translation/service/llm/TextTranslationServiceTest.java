@@ -2,6 +2,7 @@ package zas.admin.zia.translation.service.llm;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
@@ -75,6 +76,92 @@ class TextTranslationServiceTest {
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr");
 
         assertThat(result).containsExactly("Translated via vision");
+    }
+
+    @Test
+    void translatePages_renderAsMarkdownFalse_doesNotIncludeMarkdownInstructions() {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("Plain translated text");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(promptCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        List<String> result = service.translatePages(List.of("Some text"), "fr", false);
+
+        assertThat(result).containsExactly("Plain translated text");
+        assertThat(promptCaptor.getValue())
+                .doesNotContain("Markdown")
+                .doesNotContain("headings")
+                .doesNotContain("tables");
+    }
+
+    @Test
+    void translatePages_renderAsMarkdownTrue_includesMarkdownInstructions() {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("# Markdown translated text");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(promptCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        List<String> result = service.translatePages(List.of("Some text"), "fr", true);
+
+        assertThat(result).containsExactly("# Markdown translated text");
+        assertThat(promptCaptor.getValue()).contains("Markdown");
+    }
+
+    @Test
+    void translatePagesSingleStrategy_renderAsMarkdownFalse_doesNotIncludeMarkdownInstructions() {
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("Plain vision result");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.messages(messageCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", false);
+
+        assertThat(result).containsExactly("Plain vision result");
+        assertThat(messageCaptor.getValue().getText())
+                .doesNotContain("Markdown")
+                .doesNotContain("headings")
+                .doesNotContain("tables");
+    }
+
+    @Test
+    void translatePagesSingleStrategy_renderAsMarkdownTrue_includesMarkdownInstructions() {
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("# Vision markdown result");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.messages(messageCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", true);
+
+        assertThat(result).containsExactly("# Vision markdown result");
+        assertThat(messageCaptor.getValue().getText()).contains("Markdown");
     }
 
     private void stubLlmClient(String content) {
