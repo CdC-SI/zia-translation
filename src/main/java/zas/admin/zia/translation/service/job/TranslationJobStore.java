@@ -54,8 +54,10 @@ public class TranslationJobStore {
 
     public List<TranslationJob> findExpired(Duration ttl, Instant now) {
         return jobs.values().stream()
-                .filter(job -> job.completedAt() != null)
-                .filter(job -> job.completedAt().plus(ttl).isBefore(now))
+                .filter(job -> {
+                    Instant expirationBase = job.completedAt() != null ? job.completedAt() : job.createdAt();
+                    return expirationBase.plus(ttl).isBefore(now);
+                })
                 .toList();
     }
 
