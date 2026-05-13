@@ -16,7 +16,7 @@ import java.util.List;
 @Component
 class PdfDocumentParser implements DocumentParser {
 
-    private static final String SUPPORTED_MIME_TYPE = "application/pdf";
+    private static final List<String> SUPPORTED_MIME_TYPES = List.of("application/pdf");
     private static final float RENDER_DPI = 150f;
 
     @Override
@@ -39,8 +39,8 @@ class PdfDocumentParser implements DocumentParser {
     }
 
     @Override
-    public String supportedMimeType() {
-        return SUPPORTED_MIME_TYPE;
+    public List<String> supportedMimeTypes() {
+        return SUPPORTED_MIME_TYPES;
     }
 
     @Override

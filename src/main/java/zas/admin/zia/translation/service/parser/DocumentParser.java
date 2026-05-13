@@ -16,9 +16,9 @@ public interface DocumentParser {
     List<byte[]> renderPages(byte[] documentBytes) throws IOException;
 
     /**
-     * Returns the MIME type supported by this parser (e.g. "application/pdf").
+     * Returns MIME types supported by this parser (e.g. "application/pdf").
      */
-    String supportedMimeType();
+    List<String> supportedMimeTypes();
 
     /**
      * Extracts the page dimensions from the document.

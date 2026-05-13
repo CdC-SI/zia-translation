@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -65,7 +64,9 @@ public class TranslationService {
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
         this.parsersByMimeType = parsers.stream()
-                .collect(Collectors.toMap(DocumentParser::supportedMimeType, Function.identity()));
+                .flatMap(parser -> parser.supportedMimeTypes().stream()
+                        .map(mimeType -> Map.entry(mimeType, parser)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
         this.pdfGenerationService = pdfGenerationService;
@@ -206,7 +207,8 @@ public class TranslationService {
         }
         if (parser == null) {
             throw new InvalidDocumentException(
-                    "Unsupported file format: '%s'. Only PDF is currently supported.".formatted(contentType));
+                    "Unsupported file format: '%s'. Supported formats: %s."
+                            .formatted(contentType, parsersByMimeType.keySet()));
         }
         return parser;
     }

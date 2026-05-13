@@ -19,8 +19,8 @@ class PdfDocumentParserTest {
     private final PdfDocumentParser parser = new PdfDocumentParser();
 
     @Test
-    void supportedMimeType_returnsPdf() {
-        assertThat(parser.supportedMimeType()).isEqualTo("application/pdf");
+    void supportedMimeTypes_returnsPdf() {
+        assertThat(parser.supportedMimeTypes()).containsExactly("application/pdf");
     }
 
     @Test

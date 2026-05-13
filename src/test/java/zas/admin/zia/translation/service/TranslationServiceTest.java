@@ -36,6 +36,8 @@ class TranslationServiceTest {
 
     @Mock
     private DocumentParser pdfParser;
+    @Mock
+    private DocumentParser imageParser;
 
     @Mock
     private OcrExtractionService ocrService;
@@ -55,15 +57,23 @@ class TranslationServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        when(pdfParser.supportedMimeType()).thenReturn("application/pdf");
+        when(pdfParser.supportedMimeTypes()).thenReturn(List.of("application/pdf"));
+        when(imageParser.supportedMimeTypes()).thenReturn(List.of(
+                "image/png",
+                "image/jpeg",
+                "image/jpg",
+                "image/gif",
+                "image/bmp",
+                "image/webp",
+                "image/tiff"));
 
         dualService = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "10MB");
 
         singleService = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_SINGLE, "10MB");
     }
@@ -108,7 +118,9 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> dualService.translateToText(file, "fr"))
                 .isInstanceOf(InvalidDocumentException.class)
-                .hasMessageContaining("Unsupported file format");
+                .hasMessageContaining("Unsupported file format")
+                .hasMessageContaining("Supported formats")
+                .hasMessageNotContaining("Only PDF");
     }
 
     // --- parser resolution ---
@@ -124,6 +136,20 @@ class TranslationServiceTest {
         List<String> result = dualService.translateToText(file, "fr");
 
         assertThat(result).containsExactly("translated");
+    }
+
+    @Test
+    void resolveParser_imageContentType_resolvesImageParser() throws IOException {
+        when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", new byte[]{1, 2, 3});
+
+        List<String> result = dualService.translateToText(file, "fr");
+
+        assertThat(result).containsExactly("translated");
+        verify(imageParser).renderPages(any());
     }
 
     // --- corrupt PDF (IOException from renderPages) ---
