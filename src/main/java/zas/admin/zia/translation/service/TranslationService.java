@@ -24,13 +24,12 @@ import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 public class TranslationService {
@@ -64,8 +63,7 @@ public class TranslationService {
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
-        this.parsersByMimeType = parsers.stream()
-                .collect(Collectors.toMap(DocumentParser::supportedMimeType, Function.identity()));
+        this.parsersByMimeType = buildParsersByMimeType(parsers);
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
         this.pdfGenerationService = pdfGenerationService;
@@ -206,7 +204,8 @@ public class TranslationService {
         }
         if (parser == null) {
             throw new InvalidDocumentException(
-                    "Unsupported file format: '%s'. Only PDF is currently supported.".formatted(contentType));
+                    "Unsupported file format: '%s'. Supported formats: %s."
+                            .formatted(contentType, parsersByMimeType.keySet()));
         }
         return parser;
     }
@@ -225,6 +224,20 @@ public class TranslationService {
 
     private TranslationJobResponse toResponse(TranslationJob job) {
         return new TranslationJobResponse(job.jobId(), job.status());
+    }
+
+    private static Map<String, DocumentParser> buildParsersByMimeType(List<DocumentParser> parsers) {
+        Map<String, DocumentParser> parserMap = new LinkedHashMap<>();
+        for (DocumentParser parser : parsers) {
+            for (String mimeType : parser.supportedMimeTypes()) {
+                DocumentParser previous = parserMap.putIfAbsent(mimeType, parser);
+                if (previous != null && previous != parser) {
+                    throw new IllegalStateException("Duplicate parser mapping for MIME type '%s'."
+                            .formatted(mimeType));
+                }
+            }
+        }
+        return Map.copyOf(parserMap);
     }
 
     private static long parseSize(String sizeStr) {
