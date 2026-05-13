@@ -120,7 +120,8 @@ class TranslationServiceTest {
                 .isInstanceOf(InvalidDocumentException.class)
                 .hasMessageContaining("Unsupported file format")
                 .hasMessageContaining("Supported formats")
-                .hasMessageNotContaining("Only PDF");
+                .hasMessageContaining("application/pdf")
+                .hasMessageContaining("image/png");
     }
 
     // --- parser resolution ---

@@ -15,6 +15,7 @@ class ImageDocumentParser implements DocumentParser {
     private static final List<String> SUPPORTED_MIME_TYPES = List.of(
             "image/png",
             "image/jpeg",
+            // kept intentionally for compatibility with non-standard client content-types
             "image/jpg",
             "image/gif",
             "image/bmp",
