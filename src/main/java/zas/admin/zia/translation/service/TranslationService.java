@@ -232,8 +232,8 @@ public class TranslationService {
             for (String mimeType : parser.supportedMimeTypes()) {
                 DocumentParser previous = parserMap.putIfAbsent(mimeType, parser);
                 if (previous != null && previous != parser) {
-                    throw new IllegalStateException("Duplicate parser mapping for MIME type '%s': %s, %s."
-                            .formatted(mimeType, previous.getClass().getName(), parser.getClass().getName()));
+                    throw new IllegalStateException("Duplicate parser mapping for MIME type '%s'."
+                            .formatted(mimeType));
                 }
             }
         }

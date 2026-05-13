@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -298,7 +299,7 @@ class TranslationServiceTest {
 
     @Test
     void constructor_duplicateMimeType_throwsClearException() {
-        DocumentParser duplicateParser = org.mockito.Mockito.mock(DocumentParser.class);
+        DocumentParser duplicateParser = mock(DocumentParser.class);
         when(duplicateParser.supportedMimeTypes()).thenReturn(List.of("image/png"));
 
         assertThatThrownBy(() -> new TranslationService(
