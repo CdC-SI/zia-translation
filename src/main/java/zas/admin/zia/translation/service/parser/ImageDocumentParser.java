@@ -18,9 +18,7 @@ class ImageDocumentParser implements DocumentParser {
             // kept intentionally for compatibility with non-standard client content-types
             "image/jpg",
             "image/gif",
-            "image/bmp",
-            "image/webp",
-            "image/tiff");
+            "image/bmp");
 
     @Override
     public List<byte[]> renderPages(byte[] documentBytes) throws IOException {

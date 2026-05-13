@@ -63,9 +63,7 @@ class TranslationServiceTest {
                 "image/jpeg",
                 "image/jpg",
                 "image/gif",
-                "image/bmp",
-                "image/webp",
-                "image/tiff"));
+                "image/bmp"));
 
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
@@ -296,5 +294,18 @@ class TranslationServiceTest {
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174000");
         verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174000"), eq("PDF translation failed."));
         verify(translationJobStore, never()).markCompleted(anyString());
+    }
+
+    @Test
+    void constructor_duplicateMimeType_throwsClearException() {
+        DocumentParser duplicateParser = org.mockito.Mockito.mock(DocumentParser.class);
+        when(duplicateParser.supportedMimeTypes()).thenReturn(List.of("image/png"));
+
+        assertThatThrownBy(() -> new TranslationService(
+                List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, Runnable::run,
+                TranslationService.STRATEGY_DUAL, "10MB"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
     }
 }

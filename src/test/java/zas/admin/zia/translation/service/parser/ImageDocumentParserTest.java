@@ -21,9 +21,7 @@ class ImageDocumentParserTest {
                 "image/jpeg",
                 "image/jpg",
                 "image/gif",
-                "image/bmp",
-                "image/webp",
-                "image/tiff");
+                "image/bmp");
     }
 
     @Test
