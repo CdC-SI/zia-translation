@@ -7,6 +7,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
+import reactor.core.publisher.Flux;
+import reactor.test.StepVerifier;
 
 import java.util.List;
 
@@ -162,6 +164,45 @@ class TextTranslationServiceTest {
 
         assertThat(result).containsExactly("# Vision markdown result");
         assertThat(messageCaptor.getValue().getText()).contains("Markdown");
+    }
+
+    @Test
+    void translatePageStream_streamsTokens() {
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        when(streamResponseSpec.content()).thenReturn(Flux.just("Bonjour", " le", " monde"));
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(any(String.class))).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+
+        StepVerifier.create(service.translatePageStream("Hello world", "fr"))
+                .expectNext("Bonjour")
+                .expectNext(" le")
+                .expectNext(" monde")
+                .verifyComplete();
+    }
+
+    @Test
+    void translatePageSingleStrategyStream_streamsTokens() {
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        when(streamResponseSpec.content()).thenReturn(Flux.just("Token1", "Token2"));
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.messages(any(Message.class))).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+
+        StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, "de"))
+                .expectNext("Token1")
+                .expectNext("Token2")
+                .verifyComplete();
     }
 
     private void stubLlmClient(String content) {
