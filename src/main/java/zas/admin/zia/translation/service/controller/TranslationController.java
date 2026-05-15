@@ -25,6 +25,7 @@ import zas.admin.zia.translation.service.TranslationService;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationPageEvent;
+import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
 
 import java.io.IOException;
@@ -97,15 +98,15 @@ class TranslationController {
 
         AtomicInteger totalPages = new AtomicInteger(0);
 
-        Flux<ServerSentEvent<String>> pageEvents = translationService.translateToTextStream(file, targetLanguage)
-                .map(pageEvent -> toPageEvent(totalPages, pageEvent));
+        Flux<ServerSentEvent<String>> streamEvents = translationService.translateToTextStream(file, targetLanguage)
+                .map(event -> toSseEvent(totalPages, event));
 
         Mono<ServerSentEvent<String>> completeEvent = Mono.fromSupplier(() -> ServerSentEvent.<String>builder()
                 .event("complete")
                 .data(toJson(new TranslationCompleteEvent(totalPages.get())))
                 .build());
 
-        return pageEvents
+        return streamEvents
                 .concatWith(completeEvent)
                 .onErrorResume(exception -> {
                     log.error("SSE translation stream failed", exception);
@@ -116,12 +117,20 @@ class TranslationController {
                 });
     }
 
-    private ServerSentEvent<String> toPageEvent(AtomicInteger totalPages, TranslationPageEvent pageEvent) {
-        totalPages.incrementAndGet();
-        return ServerSentEvent.<String>builder()
-                .event("page")
-                .data(toJson(pageEvent))
-                .build();
+    private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
+        return switch (event) {
+            case TranslationStreamEvent.Token token -> ServerSentEvent.<String>builder()
+                    .event("token")
+                    .data(toJson(token))
+                    .build();
+            case TranslationStreamEvent.PageComplete page -> {
+                totalPages.incrementAndGet();
+                yield ServerSentEvent.<String>builder()
+                        .event("page")
+                        .data(toJson(new TranslationPageEvent(page.pageNumber(), page.text())))
+                        .build();
+            }
+        };
     }
 
     private String toJson(Object payload) {

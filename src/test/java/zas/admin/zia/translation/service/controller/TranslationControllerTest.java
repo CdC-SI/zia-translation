@@ -14,7 +14,7 @@ import reactor.core.publisher.Flux;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationService;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
-import zas.admin.zia.translation.service.dto.TranslationPageEvent;
+import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
 
 import java.util.Optional;
@@ -117,8 +117,11 @@ class TranslationControllerTest {
     void translateToText_streamsPageAndCompleteEvents() throws Exception {
         when(translationService.translateToTextStream(any(), eq("fr")))
                 .thenReturn(Flux.just(
-                        new TranslationPageEvent(1, "Page 1 traduit"),
-                        new TranslationPageEvent(2, "Page 2 traduit")
+                        new TranslationStreamEvent.Token(1, "Page 1"),
+                        new TranslationStreamEvent.Token(1, " traduit"),
+                        new TranslationStreamEvent.PageComplete(1, "Page 1 traduit"),
+                        new TranslationStreamEvent.Token(2, "Page 2 traduit"),
+                        new TranslationStreamEvent.PageComplete(2, "Page 2 traduit")
                 ));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
@@ -132,6 +135,7 @@ class TranslationControllerTest {
         mockMvc.perform(asyncDispatch(mvcResult))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("event:token")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("event:page")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("\"pageNumber\":1")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("event:complete")))

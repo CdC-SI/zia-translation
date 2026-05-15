@@ -12,7 +12,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
-import zas.admin.zia.translation.service.dto.TranslationPageEvent;
+import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
@@ -99,14 +99,31 @@ public class TranslationService {
         return pdfStorageService.load(jobId);
     }
 
-    public Flux<TranslationPageEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
+    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
         return Mono.fromCallable(() -> extractPages(file))
                 .subscribeOn(translationScheduler)
                 .flatMapMany(pages -> Flux.range(0, pages.size())
-                        .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage, false))
-                                .subscribeOn(translationScheduler)
-                                .map(translatedText -> new TranslationPageEvent(index + 1, translatedText))));
+                        .concatMap(index -> streamPageTranslation(pages.get(index), targetLanguage, index + 1)));
+    }
+
+    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber) {
+        Flux<String> tokenStream;
+        if (STRATEGY_SINGLE.equals(strategy)) {
+            tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
+        } else {
+            tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
+                    .subscribeOn(translationScheduler)
+                    .flatMapMany(extractedText -> textTranslationService.translatePageStream(extractedText, targetLanguage));
+        }
+
+        StringBuilder accumulated = new StringBuilder();
+        return tokenStream
+                .map(token -> {
+                    accumulated.append(token);
+                    return (TranslationStreamEvent) new TranslationStreamEvent.Token(pageNumber, token);
+                })
+                .concatWith(Mono.fromSupplier(() -> new TranslationStreamEvent.PageComplete(pageNumber, accumulated.toString())));
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
