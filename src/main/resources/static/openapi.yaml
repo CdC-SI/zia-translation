@@ -1,0 +1,199 @@
+openapi: 3.1.0
+info:
+  title: ZIA Translation Service
+  description: >
+    Service de traduction de documents. Accepte un fichier PDF en entrée,
+    en extrait le texte via OCR (modèle vision), et le traduit via un LLM.
+    Retourne soit un job PDF asynchrone, soit un flux SSE de pages traduites.
+  version: 0.0.1
+
+servers:
+  - url: /api/translation
+    description: Translation API base path
+
+paths:
+  /pdf:
+    post:
+      summary: Submit an async PDF translation job
+      operationId: translateToPdf
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source PDF document
+                targetLanguage:
+                  type: string
+                  description: Target language code (e.g. fr, en, de)
+      responses:
+        '202':
+          description: Translation job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /pdf/{jobId}/status:
+    get:
+      summary: Get async PDF translation job status
+      operationId: getPdfTranslationJobStatus
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '404':
+          description: Unknown job identifier
+
+  /pdf/{jobId}:
+    get:
+      summary: Download translated PDF when async job is complete
+      operationId: downloadTranslatedPdf
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Translated PDF document
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Unknown job identifier
+        '409':
+          description: Job is not completed yet (PENDING or PROCESSING)
+        '410':
+          description: Translated PDF file has expired and was cleaned up
+        '422':
+          description: Job failed during processing
+
+  /text:
+    post:
+      summary: Translate a PDF document and stream translated pages as SSE
+      operationId: translateToText
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source PDF document
+                targetLanguage:
+                  type: string
+                  description: Target language code (e.g. fr, en, de)
+      responses:
+        '200':
+          description: >
+            Server-Sent Events stream. Emits `page` events with TranslationPageEvent payload,
+            then a `complete` event with TranslationCompleteEvent payload. Emits `error`
+            with a message payload if processing fails mid-stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                pageAndComplete:
+                  summary: Example stream sequence
+                  value: |
+                    event: page
+                    data: {"pageNumber":1,"text":"Texte traduit de la page 1..."}
+
+                    event: complete
+                    data: {"totalPages":1}
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    TranslationJobResponse:
+      type: object
+      required:
+        - jobId
+        - status
+      properties:
+        jobId:
+          type: string
+          format: uuid
+          description: UUID v4 of the async translation job
+        status:
+          $ref: '#/components/schemas/JobStatus'
+
+    JobStatus:
+      type: string
+      enum:
+        - PENDING
+        - PROCESSING
+        - COMPLETED
+        - FAILED
+
+    TranslationPageEvent:
+      type: object
+      required:
+        - pageNumber
+        - text
+      properties:
+        pageNumber:
+          type: integer
+        text:
+          type: string
+
+    TranslationCompleteEvent:
+      type: object
+      required:
+        - totalPages
+      properties:
+        totalPages:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      description: Uniform error response body
+      required:
+        - status
+        - message
+        - timestamp
+      properties:
+        status:
+          type: integer
+          description: HTTP status code
+        message:
+          type: string
+          description: Human-readable error description
+        timestamp:
+          type: string
+          format: date-time
+          description: Time at which the error occurred (ISO-8601)
