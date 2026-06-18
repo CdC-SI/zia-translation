@@ -18,23 +18,25 @@ class AiClientConfiguration {
     ChatClient visionChatClient(
             @Value("${zia.internal.vision.base-url}") String baseUrl,
             @Value("${zia.internal.vision.model}") String model,
+            @Value("${zia.internal.api-key}") String apiKey,
             ObservationRegistry observationRegistry) {
-        return ChatClient.create(buildChatModel(baseUrl, model, observationRegistry));
+        return ChatClient.create(buildChatModel(baseUrl, model, apiKey, observationRegistry));
     }
 
     @Bean("llmChatClient")
     ChatClient llmChatClient(
             @Value("${zia.internal.llm.base-url}") String baseUrl,
             @Value("${zia.internal.llm.model}") String model,
+            @Value("${zia.internal.api-key}") String apiKey,
             ObservationRegistry observationRegistry) {
-        return ChatClient.create(buildChatModel(baseUrl, model, observationRegistry));
+        return ChatClient.create(buildChatModel(baseUrl, model, apiKey, observationRegistry));
     }
 
-    private static OpenAiChatModel buildChatModel(String baseUrl, String model,
+    private static OpenAiChatModel buildChatModel(String baseUrl, String model, String apiKey,
                                                    ObservationRegistry observationRegistry) {
         OpenAiApi api = OpenAiApi.builder()
                 .baseUrl(baseUrl)
-                .apiKey("none")
+                .apiKey(apiKey)
                 .build();
         OpenAiChatOptions options = OpenAiChatOptions.builder()
                 .model(model)

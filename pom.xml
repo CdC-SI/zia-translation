@@ -5,18 +5,19 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.13</version>
+        <version>3.5.14</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
     <groupId>zas.admin.zia</groupId>
     <artifactId>translation</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <name>zia-translation</name>
 
     <properties>
         <java.version>21</java.version>
-        <spring-ai.version>1.1.4</spring-ai.version>
+        <spring-ai.version>1.1.7</spring-ai.version>
+        <tomcat.version>10.1.55</tomcat.version>
     </properties>
 
     <dependencyManagement>
@@ -27,6 +28,11 @@
                 <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.modelcontextprotocol.sdk</groupId>
+                <artifactId>mcp-json-jackson2</artifactId>
+                <version>1.0.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
