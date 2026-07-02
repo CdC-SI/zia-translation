@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeTypeUtils;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -94,5 +95,32 @@ public class TextTranslationService {
             translated.add(result != null ? result : "");
         }
         return translated;
+    }
+
+    /**
+     * Streams the translation of a single text page token-by-token.
+     */
+    public Flux<String> translatePageStream(String extractedText, String targetLanguage) {
+        String prompt = TRANSLATE_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage, extractedText);
+        return llmClient.prompt()
+                .user(prompt)
+                .stream()
+                .content();
+    }
+
+    /**
+     * Streams the translation of a single image page (single strategy) token-by-token.
+     */
+    public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, String targetLanguage) {
+        String prompt = SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage);
+        Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+        UserMessage message = UserMessage.builder()
+                .text(prompt)
+                .media(media)
+                .build();
+        return visionClient.prompt()
+                .messages(message)
+                .stream()
+                .content();
     }
 }

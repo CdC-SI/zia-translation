@@ -12,7 +12,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
-import zas.admin.zia.translation.service.dto.TranslationPageEvent;
+import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
@@ -24,13 +24,12 @@ import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @Service
 public class TranslationService {
@@ -64,8 +63,7 @@ public class TranslationService {
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
-        this.parsersByMimeType = parsers.stream()
-                .collect(Collectors.toMap(DocumentParser::supportedMimeType, Function.identity()));
+        this.parsersByMimeType = buildParsersByMimeType(parsers);
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
         this.pdfGenerationService = pdfGenerationService;
@@ -101,14 +99,31 @@ public class TranslationService {
         return pdfStorageService.load(jobId);
     }
 
-    public Flux<TranslationPageEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
+    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
         return Mono.fromCallable(() -> extractPages(file))
                 .subscribeOn(translationScheduler)
                 .flatMapMany(pages -> Flux.range(0, pages.size())
-                        .concatMap(index -> Mono.fromCallable(() -> translatePage(pages.get(index), targetLanguage, false))
-                                .subscribeOn(translationScheduler)
-                                .map(translatedText -> new TranslationPageEvent(index + 1, translatedText))));
+                        .concatMap(index -> streamPageTranslation(pages.get(index), targetLanguage, index + 1)));
+    }
+
+    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber) {
+        Flux<String> tokenStream;
+        if (STRATEGY_SINGLE.equals(strategy)) {
+            tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
+        } else {
+            tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
+                    .subscribeOn(translationScheduler)
+                    .flatMapMany(extractedText -> textTranslationService.translatePageStream(extractedText, targetLanguage));
+        }
+
+        StringBuilder accumulated = new StringBuilder();
+        return tokenStream
+                .map(token -> {
+                    accumulated.append(token);
+                    return (TranslationStreamEvent) new TranslationStreamEvent.Token(pageNumber, token);
+                })
+                .concatWith(Mono.fromSupplier(() -> new TranslationStreamEvent.PageComplete(pageNumber, accumulated.toString())));
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
@@ -206,7 +221,8 @@ public class TranslationService {
         }
         if (parser == null) {
             throw new InvalidDocumentException(
-                    "Unsupported file format: '%s'. Only PDF is currently supported.".formatted(contentType));
+                    "Unsupported file format: '%s'. Supported formats: %s."
+                            .formatted(contentType, parsersByMimeType.keySet()));
         }
         return parser;
     }
@@ -225,6 +241,20 @@ public class TranslationService {
 
     private TranslationJobResponse toResponse(TranslationJob job) {
         return new TranslationJobResponse(job.jobId(), job.status());
+    }
+
+    private static Map<String, DocumentParser> buildParsersByMimeType(List<DocumentParser> parsers) {
+        Map<String, DocumentParser> parserMap = new LinkedHashMap<>();
+        for (DocumentParser parser : parsers) {
+            for (String mimeType : parser.supportedMimeTypes()) {
+                DocumentParser previous = parserMap.putIfAbsent(mimeType, parser);
+                if (previous != null && previous != parser) {
+                    throw new IllegalStateException("Duplicate parser mapping for MIME type '%s'."
+                            .formatted(mimeType));
+                }
+            }
+        }
+        return Map.copyOf(parserMap);
     }
 
     private static long parseSize(String sizeStr) {

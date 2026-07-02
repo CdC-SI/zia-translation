@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,6 +37,8 @@ class TranslationServiceTest {
 
     @Mock
     private DocumentParser pdfParser;
+    @Mock
+    private DocumentParser imageParser;
 
     @Mock
     private OcrExtractionService ocrService;
@@ -55,15 +58,21 @@ class TranslationServiceTest {
 
     @BeforeEach
     void setUp() throws IOException {
-        when(pdfParser.supportedMimeType()).thenReturn("application/pdf");
+        when(pdfParser.supportedMimeTypes()).thenReturn(List.of("application/pdf"));
+        when(imageParser.supportedMimeTypes()).thenReturn(List.of(
+                "image/png",
+                "image/jpeg",
+                "image/jpg",
+                "image/gif",
+                "image/bmp"));
 
         dualService = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "10MB");
 
         singleService = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, Runnable::run,
                 TranslationService.STRATEGY_SINGLE, "10MB");
     }
@@ -108,7 +117,10 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> dualService.translateToText(file, "fr"))
                 .isInstanceOf(InvalidDocumentException.class)
-                .hasMessageContaining("Unsupported file format");
+                .hasMessageContaining("Unsupported file format")
+                .hasMessageContaining("Supported formats")
+                .hasMessageContaining("application/pdf")
+                .hasMessageContaining("image/png");
     }
 
     // --- parser resolution ---
@@ -124,6 +136,20 @@ class TranslationServiceTest {
         List<String> result = dualService.translateToText(file, "fr");
 
         assertThat(result).containsExactly("translated");
+    }
+
+    @Test
+    void resolveParser_imageContentType_resolvesImageParser() throws IOException {
+        when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", new byte[]{1, 2, 3});
+
+        List<String> result = dualService.translateToText(file, "fr");
+
+        assertThat(result).containsExactly("translated");
+        verify(imageParser).renderPages(any());
     }
 
     // --- corrupt PDF (IOException from renderPages) ---
@@ -269,5 +295,18 @@ class TranslationServiceTest {
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174000");
         verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174000"), eq("PDF translation failed."));
         verify(translationJobStore, never()).markCompleted(anyString());
+    }
+
+    @Test
+    void constructor_duplicateMimeType_throwsClearException() {
+        DocumentParser duplicateParser = mock(DocumentParser.class);
+        when(duplicateParser.supportedMimeTypes()).thenReturn(List.of("image/png"));
+
+        assertThatThrownBy(() -> new TranslationService(
+                List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, Runnable::run,
+                TranslationService.STRATEGY_DUAL, "10MB"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
     }
 }
