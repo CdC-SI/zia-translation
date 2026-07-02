@@ -11,7 +11,7 @@
 
     <groupId>zas.admin.zia</groupId>
     <artifactId>translation</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.3.0-SNAPSHOT</version>
     <name>zia-translation</name>
 
     <properties>
