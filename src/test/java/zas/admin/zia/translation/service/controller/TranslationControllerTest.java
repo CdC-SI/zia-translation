@@ -58,7 +58,117 @@ class TranslationControllerTest {
     }
 
     @Test
+    void translateToMarkdown_validRequest_returns202AndJobId() throws Exception {
+        when(translationService.submitMarkdownTranslation(any(), eq("de")))
+                .thenReturn(new TranslationJobResponse("job-md-1", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file)
+                        .param("targetLanguage", "de"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-md-1"))
+                .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    @Test
+    void translateToMarkdown_invalidDocument_returns400() throws Exception {
+        when(translationService.submitMarkdownTranslation(any(), anyString()))
+                .thenThrow(new InvalidDocumentException("Unsupported file format."));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.txt", "text/plain", "not a pdf".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file)
+                        .param("targetLanguage", "fr"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
     void getJobStatus_knownJob_returnsStatus() throws Exception {
+        when(translationService.getJobStatusResponse("job-123"))
+                .thenReturn(Optional.of(new TranslationJobResponse("job-123", JobStatus.PROCESSING)));
+
+        mockMvc.perform(get("/api/translation/jobs/job-123/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jobId").value("job-123"))
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+    }
+
+    @Test
+    void getJobStatus_unknownJob_returns404() throws Exception {
+        when(translationService.getJobStatusResponse("missing")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/translation/jobs/missing/status"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void downloadJob_processingJob_returns409() throws Exception {
+        when(translationService.getJobStatus("job-1")).thenReturn(Optional.of(JobStatus.PROCESSING));
+
+        mockMvc.perform(get("/api/translation/jobs/job-1"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void downloadJob_completedPdfJob_returnsPdf() throws Exception {
+        byte[] pdfBytes = "%PDF-1.4".getBytes();
+        when(translationService.getJobStatus("job-2")).thenReturn(Optional.of(JobStatus.COMPLETED));
+        when(translationService.getTranslatedFile("job-2")).thenReturn(Optional.of(
+                new TranslationService.TranslatedFile(new ByteArrayResource(pdfBytes), MediaType.APPLICATION_PDF, "job-2.pdf")));
+
+        mockMvc.perform(get("/api/translation/jobs/job-2"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_PDF))
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"job-2.pdf\""));
+    }
+
+    @Test
+    void downloadJob_completedMarkdownJob_returnsMarkdown() throws Exception {
+        byte[] markdownBytes = "# Titre".getBytes();
+        MediaType markdownMediaType = new MediaType("text", "markdown");
+        when(translationService.getJobStatus("job-md-2")).thenReturn(Optional.of(JobStatus.COMPLETED));
+        when(translationService.getTranslatedFile("job-md-2")).thenReturn(Optional.of(
+                new TranslationService.TranslatedFile(new ByteArrayResource(markdownBytes), markdownMediaType, "job-md-2.md")));
+
+        mockMvc.perform(get("/api/translation/jobs/job-md-2"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(markdownMediaType))
+                .andExpect(header().string("Content-Disposition", "attachment; filename=\"job-md-2.md\""));
+    }
+
+    @Test
+    void downloadJob_completedButMissingFile_returns410() throws Exception {
+        when(translationService.getJobStatus("job-3")).thenReturn(Optional.of(JobStatus.COMPLETED));
+        when(translationService.getTranslatedFile("job-3")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/translation/jobs/job-3"))
+                .andExpect(status().isGone());
+    }
+
+    @Test
+    void downloadJob_failedJob_returns422() throws Exception {
+        when(translationService.getJobStatus("job-4")).thenReturn(Optional.of(JobStatus.FAILED));
+
+        mockMvc.perform(get("/api/translation/jobs/job-4"))
+                .andExpect(status().isUnprocessableEntity());
+    }
+
+    @Test
+    void downloadJob_unknownJob_returns404() throws Exception {
+        when(translationService.getJobStatus("missing")).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/translation/jobs/missing"))
+                .andExpect(status().isNotFound());
+    }
+
+    // --- deprecated /pdf/{jobId}... endpoints: non-regression ---
+
+    @Test
+    void deprecatedGetJobStatus_knownJob_returnsStatus() throws Exception {
         when(translationService.getJobStatusResponse("job-123"))
                 .thenReturn(Optional.of(new TranslationJobResponse("job-123", JobStatus.PROCESSING)));
 
@@ -69,7 +179,7 @@ class TranslationControllerTest {
     }
 
     @Test
-    void getJobStatus_unknownJob_returns404() throws Exception {
+    void deprecatedGetJobStatus_unknownJob_returns404() throws Exception {
         when(translationService.getJobStatusResponse("missing")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/translation/pdf/missing/status"))
@@ -77,7 +187,7 @@ class TranslationControllerTest {
     }
 
     @Test
-    void downloadPdf_processingJob_returns409() throws Exception {
+    void deprecatedDownloadPdf_processingJob_returns409() throws Exception {
         when(translationService.getJobStatus("job-1")).thenReturn(Optional.of(JobStatus.PROCESSING));
 
         mockMvc.perform(get("/api/translation/pdf/job-1"))
@@ -85,10 +195,11 @@ class TranslationControllerTest {
     }
 
     @Test
-    void downloadPdf_completedJob_returnsPdf() throws Exception {
+    void deprecatedDownloadPdf_completedJob_returnsPdf() throws Exception {
         byte[] pdfBytes = "%PDF-1.4".getBytes();
         when(translationService.getJobStatus("job-2")).thenReturn(Optional.of(JobStatus.COMPLETED));
-        when(translationService.getTranslatedPdf("job-2")).thenReturn(Optional.of(new ByteArrayResource(pdfBytes)));
+        when(translationService.getTranslatedFile("job-2")).thenReturn(Optional.of(
+                new TranslationService.TranslatedFile(new ByteArrayResource(pdfBytes), MediaType.APPLICATION_PDF, "job-2.pdf")));
 
         mockMvc.perform(get("/api/translation/pdf/job-2"))
                 .andExpect(status().isOk())
@@ -97,16 +208,16 @@ class TranslationControllerTest {
     }
 
     @Test
-    void downloadPdf_completedButMissingFile_returns410() throws Exception {
+    void deprecatedDownloadPdf_completedButMissingFile_returns410() throws Exception {
         when(translationService.getJobStatus("job-3")).thenReturn(Optional.of(JobStatus.COMPLETED));
-        when(translationService.getTranslatedPdf("job-3")).thenReturn(Optional.empty());
+        when(translationService.getTranslatedFile("job-3")).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/translation/pdf/job-3"))
                 .andExpect(status().isGone());
     }
 
     @Test
-    void downloadPdf_failedJob_returns422() throws Exception {
+    void deprecatedDownloadPdf_failedJob_returns422() throws Exception {
         when(translationService.getJobStatus("job-4")).thenReturn(Optional.of(JobStatus.FAILED));
 
         mockMvc.perform(get("/api/translation/pdf/job-4"))

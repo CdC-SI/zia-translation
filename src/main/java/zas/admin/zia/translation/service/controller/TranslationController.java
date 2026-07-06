@@ -58,15 +58,27 @@ class TranslationController {
         return ResponseEntity.accepted().body(response);
     }
 
-    @GetMapping("/pdf/{jobId}/status")
+    @PostMapping("/md")
+    ResponseEntity<TranslationJobResponse> translateToMarkdown(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+
+        log.info("Received async request to translate file '{}' to Markdown in language '{}'", file.getOriginalFilename(), targetLanguage);
+
+        TranslationJobResponse response = translationService.submitMarkdownTranslation(file, targetLanguage);
+
+        return ResponseEntity.accepted().body(response);
+    }
+
+    @GetMapping("/jobs/{jobId}/status")
     ResponseEntity<TranslationJobResponse> getJobStatus(@PathVariable String jobId) {
         return translationService.getJobStatusResponse(jobId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
-    @GetMapping("/pdf/{jobId}")
-    ResponseEntity<Resource> downloadPdf(@PathVariable String jobId) {
+    @GetMapping("/jobs/{jobId}")
+    ResponseEntity<Resource> downloadJob(@PathVariable String jobId) {
         JobStatus status = translationService.getJobStatus(jobId).orElse(null);
 
         if (status == null) {
@@ -81,12 +93,30 @@ class TranslationController {
             return ResponseEntity.unprocessableEntity().build();
         }
 
-        return translationService.getTranslatedPdf(jobId)
-                .map(resource -> ResponseEntity.ok()
-                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + jobId + ".pdf\"")
-                        .contentType(MediaType.APPLICATION_PDF)
-                        .body(resource))
+        return translationService.getTranslatedFile(jobId)
+                .map(file -> ResponseEntity.ok()
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.filename() + "\"")
+                        .contentType(file.mediaType())
+                        .body(file.resource()))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.GONE).build());
+    }
+
+    /**
+     * @deprecated use {@link #getJobStatus(String)} via {@code GET /api/translation/jobs/{jobId}/status}.
+     */
+    @Deprecated
+    @GetMapping("/pdf/{jobId}/status")
+    ResponseEntity<TranslationJobResponse> getPdfJobStatus(@PathVariable String jobId) {
+        return getJobStatus(jobId);
+    }
+
+    /**
+     * @deprecated use {@link #downloadJob(String)} via {@code GET /api/translation/jobs/{jobId}}.
+     */
+    @Deprecated
+    @GetMapping("/pdf/{jobId}")
+    ResponseEntity<Resource> downloadPdf(@PathVariable String jobId) {
+        return downloadJob(jobId);
     }
 
     @PostMapping(value = "/text", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

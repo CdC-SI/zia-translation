@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
@@ -13,6 +14,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
+import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
@@ -21,9 +23,11 @@ import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
+import zas.admin.zia.translation.service.storage.MarkdownStorageService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +42,9 @@ public class TranslationService {
     static final String STRATEGY_SINGLE = "single";
     static final String STRATEGY_DUAL = "dual";
     private static final String PDF_TRANSLATION_FAILED_MESSAGE = "PDF translation failed.";
+    private static final String MARKDOWN_TRANSLATION_FAILED_MESSAGE = "Markdown translation failed.";
+    private static final String MARKDOWN_PAGE_SEPARATOR = "\n\n<div style=\"page-break-after: always;\"></div>\n\n";
+    private static final MediaType MARKDOWN_MEDIA_TYPE = new MediaType("text", "markdown");
 
     private static final String PDF_MIME_TYPE = "application/pdf";
     private static final byte[] PDF_MAGIC = {'%', 'P', 'D', 'F'};
@@ -48,6 +55,7 @@ public class TranslationService {
     private final PdfGenerationService pdfGenerationService;
     private final TranslationJobStore translationJobStore;
     private final PdfStorageService pdfStorageService;
+    private final MarkdownStorageService markdownStorageService;
     private final Executor translationTaskExecutor;
     private final Scheduler translationScheduler;
     private final String strategy;
@@ -60,6 +68,7 @@ public class TranslationService {
             PdfGenerationService pdfGenerationService,
             TranslationJobStore translationJobStore,
             PdfStorageService pdfStorageService,
+            MarkdownStorageService markdownStorageService,
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
@@ -69,6 +78,7 @@ public class TranslationService {
         this.pdfGenerationService = pdfGenerationService;
         this.translationJobStore = translationJobStore;
         this.pdfStorageService = pdfStorageService;
+        this.markdownStorageService = markdownStorageService;
         this.translationTaskExecutor = translationTaskExecutor;
         this.translationScheduler = Schedulers.fromExecutor(translationTaskExecutor);
         this.strategy = strategy;
@@ -80,9 +90,21 @@ public class TranslationService {
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
-        TranslationJob job = translationJobStore.createPendingJob();
+        TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.PDF);
 
         CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, targetLanguage), translationTaskExecutor);
+
+        return toResponse(job);
+    }
+
+    public TranslationJobResponse submitMarkdownTranslation(MultipartFile file, String targetLanguage) throws IOException {
+        validateTargetLanguage(targetLanguage);
+        byte[] bytes = validateAndRead(file);
+        DocumentParser parser = resolveParser(file, bytes);
+
+        TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN);
+
+        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, targetLanguage), translationTaskExecutor);
 
         return toResponse(job);
     }
@@ -95,8 +117,15 @@ public class TranslationService {
         return translationJobStore.findById(jobId).map(TranslationJob::status);
     }
 
-    public Optional<Resource> getTranslatedPdf(String jobId) {
-        return pdfStorageService.load(jobId);
+    public Optional<TranslatedFile> getTranslatedFile(String jobId) {
+        return translationJobStore.findById(jobId).flatMap(job -> {
+            if (job.outputFormat() == JobOutputFormat.MARKDOWN) {
+                return markdownStorageService.load(jobId)
+                        .map(resource -> new TranslatedFile(resource, MARKDOWN_MEDIA_TYPE, jobId + ".md"));
+            }
+            return pdfStorageService.load(jobId)
+                    .map(resource -> new TranslatedFile(resource, MediaType.APPLICATION_PDF, jobId + ".pdf"));
+        });
     }
 
     public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
@@ -160,6 +189,24 @@ public class TranslationService {
             log.error("PDF translation job failed for jobId={}", jobId, exception);
             translationJobStore.markFailed(jobId, PDF_TRANSLATION_FAILED_MESSAGE);
         }
+    }
+
+    private void processMarkdownJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage) {
+        translationJobStore.markProcessing(jobId);
+        try {
+            List<byte[]> pages = parser.renderPages(bytes);
+            List<String> translatedPages = translatePages(pages, targetLanguage, true);
+            String mergedMarkdown = mergeMarkdownPages(translatedPages);
+            markdownStorageService.store(jobId, mergedMarkdown.getBytes(StandardCharsets.UTF_8));
+            translationJobStore.markCompleted(jobId);
+        } catch (Exception exception) {
+            log.error("Markdown translation job failed for jobId={}", jobId, exception);
+            translationJobStore.markFailed(jobId, MARKDOWN_TRANSLATION_FAILED_MESSAGE);
+        }
+    }
+
+    static String mergeMarkdownPages(List<String> pages) {
+        return String.join(MARKDOWN_PAGE_SEPARATOR, pages);
     }
 
     private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown) {
@@ -270,4 +317,10 @@ public class TranslationService {
         }
         return Long.parseLong(trimmed);
     }
+
+    /**
+     * A translated file ready to be downloaded, along with the metadata needed
+     * to build the HTTP response (Content-Type and file name).
+     */
+    public record TranslatedFile(Resource resource, MediaType mediaType, String filename) {}
 }
