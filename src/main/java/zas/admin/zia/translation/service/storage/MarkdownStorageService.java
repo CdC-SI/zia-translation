@@ -20,7 +20,7 @@ public class MarkdownStorageService {
     private static final Logger log = LoggerFactory.getLogger(MarkdownStorageService.class);
     private final Path storagePath;
 
-    public MarkdownStorageService(@Value("${zia.translation.pdf.storage-path}") String storagePath) {
+    public MarkdownStorageService(@Value("${zia.translation.md.storage-path}") String storagePath) {
         this.storagePath = Path.of(storagePath);
     }
 
