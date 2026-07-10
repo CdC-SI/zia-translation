@@ -48,6 +48,10 @@ paths:
     get:
       summary: Get async PDF translation job status
       operationId: getPdfTranslationJobStatus
+      deprecated: true
+      description: >
+        **Deprecated**: use `GET /jobs/{jobId}/status` instead. Kept for backward
+        compatibility; behavior is unchanged.
       parameters:
         - in: path
           name: jobId
@@ -69,6 +73,10 @@ paths:
     get:
       summary: Download translated PDF when async job is complete
       operationId: downloadTranslatedPdf
+      deprecated: true
+      description: >
+        **Deprecated**: use `GET /jobs/{jobId}` instead. Kept for backward
+        compatibility; behavior is unchanged.
       parameters:
         - in: path
           name: jobId
@@ -90,6 +98,94 @@ paths:
           description: Job is not completed yet (PENDING or PROCESSING)
         '410':
           description: Translated PDF file has expired and was cleaned up
+        '422':
+          description: Job failed during processing
+
+  /md:
+    post:
+      summary: Submit an async Markdown translation job
+      operationId: translateToMarkdown
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Source document
+                targetLanguage:
+                  type: string
+                  description: Target language code (e.g. fr, en, de)
+      responses:
+        '202':
+          description: Translation job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '400':
+          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /jobs/{jobId}/status:
+    get:
+      summary: Get async translation job status (PDF or Markdown)
+      operationId: getTranslationJobStatus
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslationJobResponse'
+        '404':
+          description: Unknown job identifier
+
+  /jobs/{jobId}:
+    get:
+      summary: Download translated file when async job is complete (PDF or Markdown)
+      operationId: downloadTranslatedFile
+      description: >
+        The response `Content-Type` and file extension depend on the job's output
+        format: `application/pdf` (`.pdf`) for a PDF job, `text/markdown` (`.md`)
+        for a Markdown job.
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Translated file (PDF or Markdown depending on the job's output format)
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/markdown:
+              schema:
+                type: string
+        '404':
+          description: Unknown job identifier
+        '409':
+          description: Job is not completed yet (PENDING or PROCESSING)
+        '410':
+          description: Translated file has expired and was cleaned up
         '422':
           description: Job failed during processing
 

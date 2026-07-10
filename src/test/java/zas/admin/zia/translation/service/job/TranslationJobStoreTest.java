@@ -18,6 +18,15 @@ class TranslationJobStoreTest {
 
         assertThat(job.jobId()).isNotBlank();
         assertThat(job.status()).isEqualTo(JobStatus.PENDING);
+        assertThat(job.outputFormat()).isEqualTo(JobOutputFormat.PDF);
+        assertThat(store.findById(job.jobId())).isPresent();
+    }
+
+    @Test
+    void createPendingJob_withMarkdownFormat_createsMarkdownJob() {
+        TranslationJob job = store.createPendingJob(JobOutputFormat.MARKDOWN);
+
+        assertThat(job.outputFormat()).isEqualTo(JobOutputFormat.MARKDOWN);
         assertThat(store.findById(job.jobId())).isPresent();
     }
 
@@ -34,6 +43,17 @@ class TranslationJobStoreTest {
     }
 
     @Test
+    void markProcessingAndCompleted_preservesOutputFormat() {
+        TranslationJob job = store.createPendingJob(JobOutputFormat.MARKDOWN);
+
+        store.markProcessing(job.jobId());
+        assertThat(store.findById(job.jobId()).orElseThrow().outputFormat()).isEqualTo(JobOutputFormat.MARKDOWN);
+
+        store.markCompleted(job.jobId());
+        assertThat(store.findById(job.jobId()).orElseThrow().outputFormat()).isEqualTo(JobOutputFormat.MARKDOWN);
+    }
+
+    @Test
     void markFailed_setsFailedStatusAndError() {
         TranslationJob job = store.createPendingJob();
 
@@ -43,6 +63,15 @@ class TranslationJobStoreTest {
         assertThat(updated.status()).isEqualTo(JobStatus.FAILED);
         assertThat(updated.errorMessage()).isEqualTo("OCR failed");
         assertThat(updated.completedAt()).isNotNull();
+    }
+
+    @Test
+    void markFailed_preservesOutputFormat() {
+        TranslationJob job = store.createPendingJob(JobOutputFormat.MARKDOWN);
+
+        store.markFailed(job.jobId(), "Translation failed");
+
+        assertThat(store.findById(job.jobId()).orElseThrow().outputFormat()).isEqualTo(JobOutputFormat.MARKDOWN);
     }
 
     @Test

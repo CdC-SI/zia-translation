@@ -7,5 +7,6 @@ public record TranslationJob(
         JobStatus status,
         Instant createdAt,
         Instant completedAt,
-        String errorMessage
+        String errorMessage,
+        JobOutputFormat outputFormat
 ) {}

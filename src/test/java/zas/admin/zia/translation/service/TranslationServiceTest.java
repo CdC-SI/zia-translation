@@ -8,12 +8,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
+import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
+import zas.admin.zia.translation.service.storage.MarkdownStorageService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.io.IOException;
@@ -52,6 +54,8 @@ class TranslationServiceTest {
     private TranslationJobStore translationJobStore;
     @Mock
     private PdfStorageService pdfStorageService;
+    @Mock
+    private MarkdownStorageService markdownStorageService;
 
     private TranslationService dualService;
     private TranslationService singleService;
@@ -68,12 +72,12 @@ class TranslationServiceTest {
 
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "10MB");
 
         singleService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
                 TranslationService.STRATEGY_SINGLE, "10MB");
     }
 
@@ -99,7 +103,7 @@ class TranslationServiceTest {
     void translateToText_fileTooLarge_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "1KB");
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
@@ -284,8 +288,8 @@ class TranslationServiceTest {
 
     @Test
     void submitPdfTranslation_processingFails_marksJobFailedWithSafeMessage() throws IOException {
-        when(translationJobStore.createPendingJob()).thenReturn(
-                new TranslationJob("123e4567-e89b-12d3-a456-426614174000", JobStatus.PENDING, Instant.now(), null, null));
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("123e4567-e89b-12d3-a456-426614174000", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.PDF));
         when(pdfParser.extractPageLayouts(any())).thenThrow(new IOException("boom"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
@@ -297,6 +301,103 @@ class TranslationServiceTest {
         verify(translationJobStore, never()).markCompleted(anyString());
     }
 
+    // --- markdown translation ---
+
+    @Test
+    void submitMarkdownTranslation_success_storesMergedMarkdownAndMarksCompleted() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN)).thenReturn(
+                new TranslationJob("123e4567-e89b-12d3-a456-426614174001", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.MARKDOWN));
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}, new byte[]{2}));
+        when(ocrService.extractText(any())).thenReturn(List.of("text1", "text2"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(true)))
+                .thenReturn(List.of("# Page 1", "# Page 2"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        dualService.submitMarkdownTranslation(file, "fr");
+
+        verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174001");
+        verify(markdownStorageService).store(eq("123e4567-e89b-12d3-a456-426614174001"),
+                eq("# Page 1\n\n<div style=\"page-break-after: always;\"></div>\n\n# Page 2".getBytes()));
+        verify(translationJobStore).markCompleted("123e4567-e89b-12d3-a456-426614174001");
+    }
+
+    @Test
+    void submitMarkdownTranslation_processingFails_marksJobFailedWithSafeMessage() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN)).thenReturn(
+                new TranslationJob("123e4567-e89b-12d3-a456-426614174002", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.MARKDOWN));
+        when(pdfParser.renderPages(any())).thenThrow(new IOException("boom"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        dualService.submitMarkdownTranslation(file, "fr");
+
+        verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174002");
+        verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174002"), eq("Markdown translation failed."));
+        verify(translationJobStore, never()).markCompleted(anyString());
+    }
+
+    @Test
+    void mergeMarkdownPages_multiplePages_joinsWithPageBreakSeparator() {
+        String merged = TranslationService.mergeMarkdownPages(List.of("Page 1", "Page 2", "Page 3"));
+
+        assertThat(merged).isEqualTo(
+                "Page 1\n\n<div style=\"page-break-after: always;\"></div>\n\nPage 2\n\n<div style=\"page-break-after: always;\"></div>\n\nPage 3");
+    }
+
+    @Test
+    void mergeMarkdownPages_singlePage_noSeparatorAdded() {
+        String merged = TranslationService.mergeMarkdownPages(List.of("Only page"));
+
+        assertThat(merged).isEqualTo("Only page");
+    }
+
+    @Test
+    void mergeMarkdownPages_zeroPages_returnsEmptyString() {
+        String merged = TranslationService.mergeMarkdownPages(List.of());
+
+        assertThat(merged).isEmpty();
+    }
+
+    // --- getTranslatedFile ---
+
+    @Test
+    void getTranslatedFile_pdfJob_resolvesFromPdfStorageWithPdfContentType() {
+        TranslationJob job = new TranslationJob(
+                "123e4567-e89b-12d3-a456-426614174003", JobStatus.COMPLETED, Instant.now(), Instant.now(), null, JobOutputFormat.PDF);
+        when(translationJobStore.findById(job.jobId())).thenReturn(java.util.Optional.of(job));
+        byte[] pdfBytes = {1, 2, 3};
+        when(pdfStorageService.load(job.jobId())).thenReturn(java.util.Optional.of(new org.springframework.core.io.ByteArrayResource(pdfBytes)));
+
+        var result = dualService.getTranslatedFile(job.jobId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().mediaType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_PDF);
+        assertThat(result.get().filename()).isEqualTo(job.jobId() + ".pdf");
+    }
+
+    @Test
+    void getTranslatedFile_markdownJob_resolvesFromMarkdownStorageWithMarkdownContentType() {
+        TranslationJob job = new TranslationJob(
+                "123e4567-e89b-12d3-a456-426614174004", JobStatus.COMPLETED, Instant.now(), Instant.now(), null, JobOutputFormat.MARKDOWN);
+        when(translationJobStore.findById(job.jobId())).thenReturn(java.util.Optional.of(job));
+        byte[] mdBytes = "# Titre".getBytes();
+        when(markdownStorageService.load(job.jobId())).thenReturn(java.util.Optional.of(new org.springframework.core.io.ByteArrayResource(mdBytes)));
+
+        var result = dualService.getTranslatedFile(job.jobId());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().mediaType()).isEqualTo(new org.springframework.http.MediaType("text", "markdown"));
+        assertThat(result.get().filename()).isEqualTo(job.jobId() + ".md");
+    }
+
+    @Test
+    void getTranslatedFile_unknownJob_returnsEmpty() {
+        when(translationJobStore.findById("missing")).thenReturn(java.util.Optional.empty());
+
+        assertThat(dualService.getTranslatedFile("missing")).isEmpty();
+    }
+
     @Test
     void constructor_duplicateMimeType_throwsClearException() {
         DocumentParser duplicateParser = mock(DocumentParser.class);
@@ -304,7 +405,7 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
                 TranslationService.STRATEGY_DUAL, "10MB"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
