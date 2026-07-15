@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
@@ -28,6 +29,12 @@ class GlobalExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, "Missing required parameter: " + ex.getParameterName());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        return buildResponse(HttpStatus.BAD_REQUEST,
+                "Invalid value for parameter '%s': %s".formatted(ex.getName(), ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

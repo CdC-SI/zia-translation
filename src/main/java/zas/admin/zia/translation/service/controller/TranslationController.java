@@ -21,6 +21,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
+import zas.admin.zia.translation.service.TranslationStrategy;
 import zas.admin.zia.translation.service.TranslationService;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
@@ -49,11 +50,12 @@ class TranslationController {
     @PostMapping("/pdf")
     ResponseEntity<TranslationJobResponse> translateToPdf(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received async request to translate file '{}' to language '{}'", file.getOriginalFilename(), targetLanguage);
 
-        TranslationJobResponse response = translationService.submitPdfTranslation(file, targetLanguage);
+        TranslationJobResponse response = translationService.submitPdfTranslation(file, targetLanguage, strategy);
 
         return ResponseEntity.accepted().body(response);
     }
@@ -61,11 +63,12 @@ class TranslationController {
     @PostMapping("/md")
     ResponseEntity<TranslationJobResponse> translateToMarkdown(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received async request to translate file '{}' to Markdown in language '{}'", file.getOriginalFilename(), targetLanguage);
 
-        TranslationJobResponse response = translationService.submitMarkdownTranslation(file, targetLanguage);
+        TranslationJobResponse response = translationService.submitMarkdownTranslation(file, targetLanguage, strategy);
 
         return ResponseEntity.accepted().body(response);
     }
@@ -122,13 +125,14 @@ class TranslationController {
     @PostMapping(value = "/text", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     Flux<ServerSentEvent<String>> translateToText(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage) throws IOException {
+            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received request to stream translated text for file '{}' to language '{}'", file.getOriginalFilename(), targetLanguage);
 
         AtomicInteger totalPages = new AtomicInteger(0);
 
-        Flux<ServerSentEvent<String>> streamEvents = translationService.translateToTextStream(file, targetLanguage)
+        Flux<ServerSentEvent<String>> streamEvents = translationService.translateToTextStream(file, targetLanguage, strategy)
                 .map(event -> toSseEvent(totalPages, event));
 
         Mono<ServerSentEvent<String>> completeEvent = Mono.fromSupplier(() -> ServerSentEvent.<String>builder()

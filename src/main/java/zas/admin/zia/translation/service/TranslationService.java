@@ -39,8 +39,6 @@ import java.util.concurrent.Executor;
 public class TranslationService {
 
     private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
-    static final String STRATEGY_SINGLE = "single";
-    static final String STRATEGY_DUAL = "dual";
     private static final String PDF_TRANSLATION_FAILED_MESSAGE = "PDF translation failed.";
     private static final String MARKDOWN_TRANSLATION_FAILED_MESSAGE = "Markdown translation failed.";
     private static final String MARKDOWN_PAGE_SEPARATOR = "\n\n<div style=\"page-break-after: always;\"></div>\n\n";
@@ -58,7 +56,7 @@ public class TranslationService {
     private final MarkdownStorageService markdownStorageService;
     private final Executor translationTaskExecutor;
     private final Scheduler translationScheduler;
-    private final String strategy;
+    private final TranslationStrategy defaultStrategy;
     private final long maxFileSizeBytes;
 
     TranslationService(
@@ -81,30 +79,32 @@ public class TranslationService {
         this.markdownStorageService = markdownStorageService;
         this.translationTaskExecutor = translationTaskExecutor;
         this.translationScheduler = Schedulers.fromExecutor(translationTaskExecutor);
-        this.strategy = strategy;
+        this.defaultStrategy = TranslationStrategy.fromString(strategy);
         this.maxFileSizeBytes = parseSize(maxFileSize);
     }
 
-    public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage) throws IOException {
+    public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
         validateTargetLanguage(targetLanguage);
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
         TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.PDF);
 
-        CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, targetLanguage), translationTaskExecutor);
+        TranslationStrategy effective = resolveStrategy(strategy);
+        CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, targetLanguage, effective), translationTaskExecutor);
 
         return toResponse(job);
     }
 
-    public TranslationJobResponse submitMarkdownTranslation(MultipartFile file, String targetLanguage) throws IOException {
+    public TranslationJobResponse submitMarkdownTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
         validateTargetLanguage(targetLanguage);
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
         TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN);
 
-        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, targetLanguage), translationTaskExecutor);
+        TranslationStrategy effective = resolveStrategy(strategy);
+        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, targetLanguage, effective), translationTaskExecutor);
 
         return toResponse(job);
     }
@@ -128,17 +128,18 @@ public class TranslationService {
         });
     }
 
-    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage) throws IOException {
+    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
         validateTargetLanguage(targetLanguage);
+        TranslationStrategy effective = resolveStrategy(strategy);
         return Mono.fromCallable(() -> extractPages(file))
                 .subscribeOn(translationScheduler)
                 .flatMapMany(pages -> Flux.range(0, pages.size())
-                        .concatMap(index -> streamPageTranslation(pages.get(index), targetLanguage, index + 1)));
+                        .concatMap(index -> streamPageTranslation(pages.get(index), targetLanguage, index + 1, effective)));
     }
 
-    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber) {
+    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber, TranslationStrategy effective) {
         Flux<String> tokenStream;
-        if (STRATEGY_SINGLE.equals(strategy)) {
+        if (effective == TranslationStrategy.SINGLE) {
             tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
         } else {
             tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
@@ -157,7 +158,7 @@ public class TranslationService {
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
-        return translatePages(extractPages(file), targetLanguage, false);
+        return translatePages(extractPages(file), targetLanguage, false, defaultStrategy);
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
@@ -172,16 +173,16 @@ public class TranslationService {
         } catch (IOException exception) {
             throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
         }
-        List<String> translatedPages = translatePages(pages, targetLanguage, true);
+        List<String> translatedPages = translatePages(pages, targetLanguage, true, defaultStrategy);
         return pdfGenerationService.generatePdf(translatedPages, pageLayouts);
     }
 
-    private void processPdfJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage) {
+    private void processPdfJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage, TranslationStrategy effective) {
         translationJobStore.markProcessing(jobId);
         try {
             List<PageLayout> pageLayouts = parser.extractPageLayouts(bytes);
             List<byte[]> pages = parser.renderPages(bytes);
-            List<String> translatedPages = translatePages(pages, targetLanguage, true);
+            List<String> translatedPages = translatePages(pages, targetLanguage, true, effective);
             byte[] generatedPdf = pdfGenerationService.generatePdf(translatedPages, pageLayouts);
             pdfStorageService.store(jobId, generatedPdf);
             translationJobStore.markCompleted(jobId);
@@ -191,11 +192,11 @@ public class TranslationService {
         }
     }
 
-    private void processMarkdownJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage) {
+    private void processMarkdownJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage, TranslationStrategy effective) {
         translationJobStore.markProcessing(jobId);
         try {
             List<byte[]> pages = parser.renderPages(bytes);
-            List<String> translatedPages = translatePages(pages, targetLanguage, true);
+            List<String> translatedPages = translatePages(pages, targetLanguage, true, effective);
             String mergedMarkdown = mergeMarkdownPages(translatedPages);
             markdownStorageService.store(jobId, mergedMarkdown.getBytes(StandardCharsets.UTF_8));
             translationJobStore.markCompleted(jobId);
@@ -209,9 +210,9 @@ public class TranslationService {
         return String.join(MARKDOWN_PAGE_SEPARATOR, pages);
     }
 
-    private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown) {
+    private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown, TranslationStrategy effective) {
         try {
-            if (STRATEGY_SINGLE.equals(strategy)) {
+            if (effective == TranslationStrategy.SINGLE) {
                 return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage, renderAsMarkdown);
             }
             List<String> extracted = ocrService.extractText(pages);
@@ -224,7 +225,11 @@ public class TranslationService {
     }
 
     private String translatePage(byte[] page, String targetLanguage, boolean renderAsMarkdown) {
-        return translatePages(List.of(page), targetLanguage, renderAsMarkdown).getFirst();
+        return translatePages(List.of(page), targetLanguage, renderAsMarkdown, defaultStrategy).getFirst();
+    }
+
+    private TranslationStrategy resolveStrategy(TranslationStrategy requestStrategy) {
+        return requestStrategy != null ? requestStrategy : this.defaultStrategy;
     }
 
     private List<byte[]> extractPages(MultipartFile file) throws IOException {
