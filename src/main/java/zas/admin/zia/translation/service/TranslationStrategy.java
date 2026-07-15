@@ -5,15 +5,15 @@ public enum TranslationStrategy {
     DUAL;
 
     /**
-     * Résout la valeur de l'enum depuis une chaîne insensible à la casse.
-     * Utilisé par le convertisseur Spring MVC pour les @RequestParam.
+     * Resolves the enum value from a case-insensitive string.
+     * Used by the Spring MVC converter for @RequestParam binding.
      */
     public static TranslationStrategy fromString(String value) {
         return switch (value.trim().toUpperCase()) {
             case "SINGLE" -> SINGLE;
             case "DUAL" -> DUAL;
             default -> throw new IllegalArgumentException(
-                    "Valeur de stratégie inconnue : '%s'. Valeurs acceptées : single, dual.".formatted(value));
+                    "Unknown strategy value: '%s'. Accepted values: single, dual.".formatted(value));
         };
     }
 }
