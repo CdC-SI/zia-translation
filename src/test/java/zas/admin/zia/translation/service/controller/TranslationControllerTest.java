@@ -339,7 +339,9 @@ class TranslationControllerTest {
                         .param("targetLanguage", "de")
                         .param("strategy", "fast"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400));
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'fast' for parameter 'strategy'. Allowed values: single, dual"));
     }
 
     @Test
@@ -366,7 +368,9 @@ class TranslationControllerTest {
                         .param("targetLanguage", "fr")
                         .param("strategy", "auto"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400));
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'auto' for parameter 'strategy'. Allowed values: single, dual"));
     }
 
     @Test
@@ -398,6 +402,8 @@ class TranslationControllerTest {
                         .param("targetLanguage", "fr")
                         .param("strategy", "unknown"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400));
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'unknown' for parameter 'strategy'. Allowed values: single, dual"));
     }
 }

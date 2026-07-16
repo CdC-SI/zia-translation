@@ -12,6 +12,9 @@ import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.dto.ErrorResponse;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -33,6 +36,15 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        Class<?> requiredType = ex.getRequiredType();
+        if (requiredType != null && requiredType.isEnum()) {
+            String allowedValues = Arrays.stream(requiredType.getEnumConstants())
+                    .map(value -> value.toString().toLowerCase(Locale.ROOT))
+                    .collect(Collectors.joining(", "));
+            return buildResponse(HttpStatus.BAD_REQUEST,
+                    "Invalid value '%s' for parameter '%s'. Allowed values: %s"
+                            .formatted(ex.getValue(), ex.getName(), allowedValues));
+        }
         return buildResponse(HttpStatus.BAD_REQUEST,
                 "Invalid value for parameter '%s': %s".formatted(ex.getName(), ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()));
     }
