@@ -17,11 +17,14 @@ import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.job.JobStatus;
 
+import zas.admin.zia.translation.service.TranslationStrategy;
+
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -44,7 +47,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToPdf_validRequest_returns202AndJobId() throws Exception {
-        when(translationService.submitPdfTranslation(any(), eq("de")))
+        when(translationService.submitPdfTranslation(any(), eq("de"), isNull()))
                 .thenReturn(new TranslationJobResponse("job-123", JobStatus.PENDING));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
@@ -59,7 +62,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToMarkdown_validRequest_returns202AndJobId() throws Exception {
-        when(translationService.submitMarkdownTranslation(any(), eq("de")))
+        when(translationService.submitMarkdownTranslation(any(), eq("de"), isNull()))
                 .thenReturn(new TranslationJobResponse("job-md-1", JobStatus.PENDING));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
@@ -74,7 +77,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToMarkdown_invalidDocument_returns400() throws Exception {
-        when(translationService.submitMarkdownTranslation(any(), anyString()))
+        when(translationService.submitMarkdownTranslation(any(), anyString(), isNull()))
                 .thenThrow(new InvalidDocumentException("Unsupported file format."));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.txt", "text/plain", "not a pdf".getBytes());
@@ -226,7 +229,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToText_streamsPageAndCompleteEvents() throws Exception {
-        when(translationService.translateToTextStream(any(), eq("fr")))
+        when(translationService.translateToTextStream(any(), eq("fr"), isNull()))
                 .thenReturn(Flux.just(
                         new TranslationStreamEvent.Token(1, "Page 1"),
                         new TranslationStreamEvent.Token(1, " traduit"),
@@ -255,7 +258,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToText_streamingFailure_returnsErrorEvent() throws Exception {
-        when(translationService.translateToTextStream(any(), anyString()))
+        when(translationService.translateToTextStream(any(), anyString(), isNull()))
                 .thenReturn(Flux.error(new RuntimeException("OCR extraction failed on page 3")));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
@@ -283,7 +286,7 @@ class TranslationControllerTest {
 
     @Test
     void translateToPdf_invalidDocument_returns400() throws Exception {
-        when(translationService.submitPdfTranslation(any(), anyString()))
+        when(translationService.submitPdfTranslation(any(), anyString(), isNull()))
                 .thenThrow(new InvalidDocumentException("Unsupported file format."));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.txt", "text/plain", "not a pdf".getBytes());
@@ -293,5 +296,114 @@ class TranslationControllerTest {
                         .param("targetLanguage", "fr"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value(400));
+    }
+
+    // --- strategy parameter tests ---
+
+    @Test
+    void translateToPdf_withStrategySingle_passesStrategyToService() throws Exception {
+        when(translationService.submitPdfTranslation(any(), eq("de"), eq(TranslationStrategy.SINGLE)))
+                .thenReturn(new TranslationJobResponse("job-s1", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/pdf")
+                        .file(file)
+                        .param("targetLanguage", "de")
+                        .param("strategy", "single"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-s1"));
+    }
+
+    @Test
+    void translateToPdf_withStrategyDual_passesStrategyToService() throws Exception {
+        when(translationService.submitPdfTranslation(any(), eq("de"), eq(TranslationStrategy.DUAL)))
+                .thenReturn(new TranslationJobResponse("job-d1", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/pdf")
+                        .file(file)
+                        .param("targetLanguage", "de")
+                        .param("strategy", "dual"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-d1"));
+    }
+
+    @Test
+    void translateToPdf_withInvalidStrategy_returns400() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/pdf")
+                        .file(file)
+                        .param("targetLanguage", "de")
+                        .param("strategy", "fast"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'fast' for parameter 'strategy'. Allowed values: single, dual"));
+    }
+
+    @Test
+    void translateToMarkdown_withStrategySingle_passesStrategyToService() throws Exception {
+        when(translationService.submitMarkdownTranslation(any(), eq("fr"), eq(TranslationStrategy.SINGLE)))
+                .thenReturn(new TranslationJobResponse("job-md-s1", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file)
+                        .param("targetLanguage", "fr")
+                        .param("strategy", "single"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-md-s1"));
+    }
+
+    @Test
+    void translateToMarkdown_withInvalidStrategy_returns400() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file)
+                        .param("targetLanguage", "fr")
+                        .param("strategy", "auto"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'auto' for parameter 'strategy'. Allowed values: single, dual"));
+    }
+
+    @Test
+    void translateToText_withStrategyDual_passesStrategyToService() throws Exception {
+        when(translationService.translateToTextStream(any(), eq("fr"), eq(TranslationStrategy.DUAL)))
+                .thenReturn(Flux.just(
+                        new TranslationStreamEvent.PageComplete(1, "Page 1")
+                ));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        MvcResult mvcResult = mockMvc.perform(multipart("/api/translation/text")
+                        .file(file)
+                        .param("targetLanguage", "fr")
+                        .param("strategy", "dual"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(mvcResult))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void translateToText_withInvalidStrategy_returns400() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/text")
+                        .file(file)
+                        .param("targetLanguage", "fr")
+                        .param("strategy", "unknown"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value(
+                        "Invalid value 'unknown' for parameter 'strategy'. Allowed values: single, dual"));
     }
 }

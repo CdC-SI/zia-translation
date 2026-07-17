@@ -73,12 +73,12 @@ class TranslationServiceTest {
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                TranslationService.STRATEGY_DUAL, "10MB");
+                "dual", "10MB");
 
         singleService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                TranslationService.STRATEGY_SINGLE, "10MB");
+                "single", "10MB");
     }
 
     // --- validation ---
@@ -104,7 +104,7 @@ class TranslationServiceTest {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                TranslationService.STRATEGY_DUAL, "1KB");
+                "dual", "1KB");
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
         MockMultipartFile file = new MockMultipartFile("file", "big.pdf", "application/pdf", bigContent);
@@ -238,6 +238,71 @@ class TranslationServiceTest {
         assertThat(result).containsExactly("single strategy result");
     }
 
+    @Test
+    void submitPdfTranslation_withExplicitSingleStrategy_overridesDualDefault() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("job-1", JobStatus.PENDING, java.time.Instant.now(), null, null, JobOutputFormat.PDF));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(true)))
+                .thenReturn(List.of("single result"));
+        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        dualService.submitPdfTranslation(file, "fr", TranslationStrategy.SINGLE);
+
+        verify(textTranslationService).translatePagesSingleStrategy(any(), anyString(), eq(true));
+        verify(ocrService, never()).extractText(any());
+    }
+
+    @Test
+    void submitPdfTranslation_withExplicitDualStrategy_overridesSingleDefault() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("job-2", JobStatus.PENDING, java.time.Instant.now(), null, null, JobOutputFormat.PDF));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("extracted"));
+        when(textTranslationService.translatePages(any(), anyString(), eq(true)))
+                .thenReturn(List.of("dual result"));
+        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        singleService.submitPdfTranslation(file, "fr", TranslationStrategy.DUAL);
+
+        verify(ocrService).extractText(any());
+        verify(textTranslationService).translatePages(any(), anyString(), eq(true));
+    }
+
+    @Test
+    void submitPdfTranslation_withNullStrategy_fallsBackToDefaultStrategy() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("job-3", JobStatus.PENDING, java.time.Instant.now(), null, null, JobOutputFormat.PDF));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(true)))
+                .thenReturn(List.of("single result"));
+        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        singleService.submitPdfTranslation(file, "fr", null);
+
+        verify(textTranslationService).translatePagesSingleStrategy(any(), anyString(), eq(true));
+        verify(ocrService, never()).extractText(any());
+    }
+
+    @Test
+    void constructor_invalidStrategyValue_throwsException() {
+        assertThatThrownBy(() -> new TranslationService(
+                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                "invalid-strategy", "10MB"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid-strategy");
+    }
+
     // --- translateToPdf ---
 
     @Test
@@ -294,7 +359,7 @@ class TranslationServiceTest {
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
-        dualService.submitPdfTranslation(file, "fr");
+        dualService.submitPdfTranslation(file, "fr", null);
 
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174000");
         verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174000"), eq("PDF translation failed."));
@@ -314,7 +379,7 @@ class TranslationServiceTest {
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
-        dualService.submitMarkdownTranslation(file, "fr");
+        dualService.submitMarkdownTranslation(file, "fr", null);
 
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174001");
         verify(markdownStorageService).store(eq("123e4567-e89b-12d3-a456-426614174001"),
@@ -330,7 +395,7 @@ class TranslationServiceTest {
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
-        dualService.submitMarkdownTranslation(file, "fr");
+        dualService.submitMarkdownTranslation(file, "fr", null);
 
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174002");
         verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174002"), eq("Markdown translation failed."));
@@ -406,7 +471,7 @@ class TranslationServiceTest {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                TranslationService.STRATEGY_DUAL, "10MB"))
+                "dual", "10MB"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
     }

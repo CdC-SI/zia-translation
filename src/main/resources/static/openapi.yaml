@@ -30,6 +30,8 @@ paths:
                 targetLanguage:
                   type: string
                   description: Target language code (e.g. fr, en, de)
+                strategy:
+                  $ref: '#/components/schemas/TranslationStrategy'
       responses:
         '202':
           description: Translation job accepted
@@ -38,7 +40,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TranslationJobResponse'
         '400':
-          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
           content:
             application/json:
               schema:
@@ -119,6 +121,8 @@ paths:
                 targetLanguage:
                   type: string
                   description: Target language code (e.g. fr, en, de)
+                strategy:
+                  $ref: '#/components/schemas/TranslationStrategy'
       responses:
         '202':
           description: Translation job accepted
@@ -127,7 +131,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TranslationJobResponse'
         '400':
-          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
           content:
             application/json:
               schema:
@@ -207,6 +211,8 @@ paths:
                 targetLanguage:
                   type: string
                   description: Target language code (e.g. fr, en, de)
+                strategy:
+                  $ref: '#/components/schemas/TranslationStrategy'
       responses:
         '200':
           description: >
@@ -227,7 +233,7 @@ paths:
                     event: complete
                     data: {"totalPages":1}
         '400':
-          description: Bad request — missing file, empty file, unsupported format, or missing targetLanguage
+          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
           content:
             application/json:
               schema:
@@ -235,6 +241,15 @@ paths:
 
 components:
   schemas:
+    TranslationStrategy:
+      type: string
+      description: >
+        Translation strategy to use for this request. If omitted, the global
+        configuration (`zia.translation.strategy`) is used as a fallback.
+      enum:
+        - single
+        - dual
+
     TranslationJobResponse:
       type: object
       required:

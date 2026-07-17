@@ -5,12 +5,16 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.dto.ErrorResponse;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -28,6 +32,21 @@ class GlobalExceptionHandler {
     @ExceptionHandler(MissingServletRequestParameterException.class)
     ResponseEntity<ErrorResponse> handleMissingParam(MissingServletRequestParameterException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, "Missing required parameter: " + ex.getParameterName());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        Class<?> requiredType = ex.getRequiredType();
+        if (requiredType != null && requiredType.isEnum()) {
+            String allowedValues = Arrays.stream(requiredType.getEnumConstants())
+                    .map(value -> value.toString().toLowerCase(Locale.ROOT))
+                    .collect(Collectors.joining(", "));
+            return buildResponse(HttpStatus.BAD_REQUEST,
+                    "Invalid value '%s' for parameter '%s'. Allowed values: %s"
+                            .formatted(ex.getValue(), ex.getName(), allowedValues));
+        }
+        return buildResponse(HttpStatus.BAD_REQUEST,
+                "Invalid value for parameter '%s': %s".formatted(ex.getName(), ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage()));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
