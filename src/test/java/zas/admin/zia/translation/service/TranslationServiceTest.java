@@ -6,6 +6,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import reactor.test.StepVerifier;
+import zas.admin.zia.translation.service.image.ImagePreprocessingException;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.job.JobOutputFormat;
@@ -236,6 +238,37 @@ class TranslationServiceTest {
         List<String> result = singleService.translateToText(file, "fr");
 
         assertThat(result).containsExactly("single strategy result");
+    }
+
+    @Test
+    void translateToTextStream_singleStrategy_mapsImagePreprocessingFailure() throws IOException {
+        when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(textTranslationService.translatePageSingleStrategyStream(any(), anyString()))
+                .thenThrow(new ImagePreprocessingException("invalid image"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", new byte[]{1});
+
+        StepVerifier.create(singleService.translateToTextStream(file, "fr", null))
+                .expectErrorSatisfies(error -> {
+                    assertThat(error).isInstanceOf(TranslationProcessingException.class);
+                    assertThat(error).hasCauseInstanceOf(ImagePreprocessingException.class);
+                })
+                .verify();
+    }
+
+    @Test
+    void translateToTextStream_dualStrategy_mapsImagePreprocessingFailure() throws IOException {
+        when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenThrow(new ImagePreprocessingException("invalid image"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", new byte[]{1});
+
+        StepVerifier.create(dualService.translateToTextStream(file, "fr", null))
+                .expectErrorSatisfies(error -> {
+                    assertThat(error).isInstanceOf(TranslationProcessingException.class);
+                    assertThat(error).hasCauseInstanceOf(ImagePreprocessingException.class);
+                })
+                .verify();
     }
 
     @Test

@@ -14,6 +14,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
+import zas.admin.zia.translation.service.image.ImagePreprocessingException;
 import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
@@ -139,22 +140,25 @@ public class TranslationService {
     }
 
     private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber, TranslationStrategy strategy) {
-        Flux<String> tokenStream;
-        if (strategy == TranslationStrategy.SINGLE) {
-            tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
-        } else {
-            tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
-                    .subscribeOn(translationScheduler)
-                    .flatMapMany(extractedText -> textTranslationService.translatePageStream(extractedText, targetLanguage));
-        }
+        return Flux.defer(() -> {
+            Flux<String> tokenStream;
+            if (strategy == TranslationStrategy.SINGLE) {
+                tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
+            } else {
+                tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
+                        .subscribeOn(translationScheduler)
+                        .flatMapMany(extractedText -> textTranslationService.translatePageStream(extractedText, targetLanguage));
+            }
 
-        StringBuilder accumulated = new StringBuilder();
-        return tokenStream
-                .map(token -> {
-                    accumulated.append(token);
-                    return (TranslationStreamEvent) new TranslationStreamEvent.Token(pageNumber, token);
-                })
-                .concatWith(Mono.fromSupplier(() -> new TranslationStreamEvent.PageComplete(pageNumber, accumulated.toString())));
+            StringBuilder accumulated = new StringBuilder();
+            return tokenStream
+                    .map(token -> {
+                        accumulated.append(token);
+                        return (TranslationStreamEvent) new TranslationStreamEvent.Token(pageNumber, token);
+                    })
+                    .concatWith(Mono.fromSupplier(() -> new TranslationStreamEvent.PageComplete(pageNumber, accumulated.toString())));
+        }).onErrorMap(ImagePreprocessingException.class,
+                ex -> new TranslationProcessingException("Failed to process document translation.", ex));
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {

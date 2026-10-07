@@ -140,6 +140,12 @@ class VisionImagePreprocessorTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void constructor_jpegQualityNaN_throwsIllegalArgumentException() {
+        assertThatThrownBy(() -> new VisionImagePreprocessor(1024, Float.NaN))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private void assertDimensions(int sourceWidth, int sourceHeight, int expectedWidth, int expectedHeight) throws IOException {
         BufferedImage source = createImage(sourceWidth, sourceHeight);
         VisionImagePreprocessor.PreprocessedImage result = preprocessor.preprocess(toPng(source));

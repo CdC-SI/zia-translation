@@ -40,7 +40,7 @@ public class VisionImagePreprocessor {
         if (maxEdge < DIMENSION_MULTIPLE) {
             throw new IllegalArgumentException("zia.translation.vision.preprocessing.max-edge must be >= " + DIMENSION_MULTIPLE);
         }
-        if (jpegQuality <= 0.0f || jpegQuality > 1.0f) {
+        if (!Float.isFinite(jpegQuality) || jpegQuality <= 0.0f || jpegQuality > 1.0f) {
             throw new IllegalArgumentException("zia.translation.vision.preprocessing.jpeg-quality must be in range ]0.0, 1.0]");
         }
         this.maxEdge = maxEdge;
