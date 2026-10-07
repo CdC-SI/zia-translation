@@ -78,6 +78,13 @@ class CallerLoggingFilterTest {
         assertThat(output).doesNotContain("Caller [");
     }
 
+    @Test
+    void doesNotSkipPathsWithActuatorPrefix(CapturedOutput output) throws Exception {
+        filter.doFilter(request("/zia-trad/actuator-admin"), new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(output).contains("Caller [");
+    }
+
     private static MockHttpServletRequest request(String uri) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", uri);
         request.setContextPath("/zia-trad");

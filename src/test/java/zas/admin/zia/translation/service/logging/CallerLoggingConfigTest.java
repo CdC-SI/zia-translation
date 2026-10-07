@@ -24,12 +24,12 @@ class CallerLoggingConfigTest {
 
     @Test
     void filterRegisteredAfterSecurityChainWhenEnabled() {
-        runner.withPropertyValues("zia.logging.caller.enabled=true")
+        runner.withPropertyValues("zia.logging.caller.enabled=true", "spring.security.filter.order=42")
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(FilterRegistrationBean.class);
                     FilterRegistrationBean<?> registration = ctx.getBean(FilterRegistrationBean.class);
                     assertThat(registration.getFilter()).isInstanceOf(CallerLoggingFilter.class);
-                    assertThat(registration.getOrder()).isEqualTo(-99);
+                    assertThat(registration.getOrder()).isEqualTo(43);
                 });
     }
 }

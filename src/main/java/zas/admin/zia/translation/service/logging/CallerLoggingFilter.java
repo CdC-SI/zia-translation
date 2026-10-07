@@ -29,7 +29,7 @@ class CallerLoggingFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        return path.startsWith(ACTUATOR_PATH);
+        return path.equals(ACTUATOR_PATH) || path.startsWith(ACTUATOR_PATH + "/");
     }
 
     @Override
