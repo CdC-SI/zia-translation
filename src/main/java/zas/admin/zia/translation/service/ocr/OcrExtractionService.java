@@ -4,9 +4,8 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,15 +22,17 @@ public class OcrExtractionService {
             """;
 
     private final ChatClient visionClient;
+    private final VisionImagePreprocessor imagePreprocessor;
 
-    OcrExtractionService(@Qualifier("visionChatClient") ChatClient visionClient) {
+    OcrExtractionService(@Qualifier("visionChatClient") ChatClient visionClient, VisionImagePreprocessor imagePreprocessor) {
         this.visionClient = visionClient;
+        this.imagePreprocessor = imagePreprocessor;
     }
 
     public List<String> extractText(List<byte[]> pageImages) {
         List<String> extracted = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
-            Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+            Media media = imagePreprocessor.toMedia(imageBytes);
             UserMessage message = UserMessage.builder()
                     .text(OCR_PROMPT)
                     .media(media)
