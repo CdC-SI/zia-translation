@@ -1,0 +1,8 @@
+### Translate a plain text (synchronous, no job, no streaming)
+POST http://localhost:8080/zia-trad/api/translation/plain-text
+Content-Type: application/json
+
+{
+  "text": "Bonjour, comment allez-vous ?",
+  "targetLanguage": "de"
+}

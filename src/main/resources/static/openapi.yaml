@@ -239,6 +239,42 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /plain-text:
+    post:
+      summary: Synchronously translate a plain text (no file, no job, no streaming)
+      operationId: translatePlainText
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlainTextTranslationRequest'
+      responses:
+        '200':
+          description: Translated text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlainTextTranslationResponse'
+        '400':
+          description: Bad request — missing/unreadable body, missing or empty `text`/`targetLanguage`, or `text` too long
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: Unsupported Content-Type (must be `application/json`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Translation failed on the LLM side
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   schemas:
     TranslationStrategy:
@@ -289,6 +325,28 @@ components:
       properties:
         totalPages:
           type: integer
+
+    PlainTextTranslationRequest:
+      type: object
+      required:
+        - text
+        - targetLanguage
+      properties:
+        text:
+          type: string
+          description: Source plain text to translate
+        targetLanguage:
+          type: string
+          description: Target language code (e.g. fr, en, de)
+
+    PlainTextTranslationResponse:
+      type: object
+      required:
+        - translatedText
+      properties:
+        translatedText:
+          type: string
+          description: The translated plain text
 
     ErrorResponse:
       type: object

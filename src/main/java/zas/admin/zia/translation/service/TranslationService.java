@@ -59,6 +59,7 @@ public class TranslationService {
     private final Scheduler translationScheduler;
     private final TranslationStrategy defaultStrategy;
     private final long maxFileSizeBytes;
+    private final int maxTextLength;
 
     TranslationService(
             List<DocumentParser> parsers,
@@ -70,7 +71,8 @@ public class TranslationService {
             MarkdownStorageService markdownStorageService,
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
-            @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
+            @Value("${zia.translation.pdf.max-file-size}") String maxFileSize,
+            @Value("${zia.translation.text.max-length}") int maxTextLength) {
 
         this.parsersByMimeType = buildParsersByMimeType(parsers);
         this.ocrService = ocrService;
@@ -83,6 +85,7 @@ public class TranslationService {
         this.translationScheduler = Schedulers.fromExecutor(translationTaskExecutor);
         this.defaultStrategy = TranslationStrategy.fromString(strategy);
         this.maxFileSizeBytes = parseSize(maxFileSize);
+        this.maxTextLength = maxTextLength;
     }
 
     public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
@@ -167,6 +170,16 @@ public class TranslationService {
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
         validateTargetLanguage(targetLanguage);
         return translatePages(extractPages(file), targetLanguage, false);
+    }
+
+    public String translatePlainText(String text, String targetLanguage) {
+        validateTargetLanguage(targetLanguage);
+        validateText(text);
+        try {
+            return textTranslationService.translateText(text, targetLanguage).strip();
+        } catch (RuntimeException ex) {
+            throw new TranslationProcessingException("Failed to process text translation.", ex);
+        }
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
@@ -265,6 +278,17 @@ public class TranslationService {
     private void validateTargetLanguage(String targetLanguage) {
         if (targetLanguage == null || targetLanguage.isBlank()) {
             throw new InvalidDocumentException("Target language is missing or empty.");
+        }
+    }
+
+    private void validateText(String text) {
+        if (text == null || text.isBlank()) {
+            throw new InvalidDocumentException("Text is missing or empty.");
+        }
+        if (text.length() > maxTextLength) {
+            throw new InvalidDocumentException(
+                    "Text length (%d characters) exceeds maximum allowed (%d characters)."
+                            .formatted(text.length(), maxTextLength));
         }
     }
 

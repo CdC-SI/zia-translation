@@ -100,6 +100,18 @@ public class TextTranslationService {
     }
 
     /**
+     * Translates a single plain text in one blocking (non-streamed) LLM call.
+     */
+    public String translateText(String text, String targetLanguage) {
+        String prompt = TRANSLATE_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage, text);
+        String result = llmClient.prompt()
+                .user(prompt)
+                .call()
+                .content();
+        return result != null ? result : "";
+    }
+
+    /**
      * Streams the translation of a single text page token-by-token.
      */
     public Flux<String> translatePageStream(String extractedText, String targetLanguage) {

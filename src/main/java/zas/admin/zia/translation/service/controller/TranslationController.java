@@ -13,6 +13,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +24,8 @@ import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.TranslationStrategy;
 import zas.admin.zia.translation.service.TranslationService;
+import zas.admin.zia.translation.service.dto.PlainTextTranslationRequest;
+import zas.admin.zia.translation.service.dto.PlainTextTranslationResponse;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationPageEvent;
@@ -149,6 +152,23 @@ class TranslationController {
                             .data(toJson(Map.of("message", resolveErrorMessage(exception))))
                             .build());
                 });
+    }
+
+    @PostMapping(value = "/plain-text", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<PlainTextTranslationResponse> translatePlainText(@RequestBody PlainTextTranslationRequest request) {
+        String text = request != null ? request.text() : null;
+        String targetLanguage = request != null ? request.targetLanguage() : null;
+
+        log.info("Received synchronous plain-text translation request to language '{}' (text length={})",
+                sanitizeForLog(targetLanguage), text != null ? text.length() : 0);
+
+        String translatedText = translationService.translatePlainText(text, targetLanguage);
+
+        return ResponseEntity.ok(new PlainTextTranslationResponse(translatedText));
+    }
+
+    private static String sanitizeForLog(String value) {
+        return value == null ? null : value.replace("\r", "\\r").replace("\n", "\\n");
     }
 
 private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
