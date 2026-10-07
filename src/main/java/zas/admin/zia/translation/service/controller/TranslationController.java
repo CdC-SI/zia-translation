@@ -160,11 +160,15 @@ class TranslationController {
         String targetLanguage = request != null ? request.targetLanguage() : null;
 
         log.info("Received synchronous plain-text translation request to language '{}' (text length={})",
-                targetLanguage, text != null ? text.length() : 0);
+                sanitizeForLog(targetLanguage), text != null ? text.length() : 0);
 
         String translatedText = translationService.translatePlainText(text, targetLanguage);
 
         return ResponseEntity.ok(new PlainTextTranslationResponse(translatedText));
+    }
+
+    private static String sanitizeForLog(String value) {
+        return value == null ? null : value.replace("\r", "\\r").replace("\n", "\\n");
     }
 
 private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
