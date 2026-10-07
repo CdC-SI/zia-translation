@@ -151,21 +151,22 @@ class TranslationController {
                 });
     }
 
-    private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
-        return switch (event) {
-            case TranslationStreamEvent.Token token -> ServerSentEvent.<String>builder()
-                    .event("token")
-                    .data(toJson(token))
+private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
+    return switch (event) {
+        case TranslationStreamEvent.Token(var ignored, String ignored1) -> ServerSentEvent.<String>builder()
+                .event("token")
+                .data(toJson(event))
+                .build();
+
+        case TranslationStreamEvent.PageComplete(var pageNumber, var text) -> {
+            totalPages.incrementAndGet();
+            yield ServerSentEvent.<String>builder()
+                    .event("page")
+                    .data(toJson(new TranslationPageEvent(pageNumber, text)))
                     .build();
-            case TranslationStreamEvent.PageComplete page -> {
-                totalPages.incrementAndGet();
-                yield ServerSentEvent.<String>builder()
-                        .event("page")
-                        .data(toJson(new TranslationPageEvent(page.pageNumber(), page.text())))
-                        .build();
-            }
-        };
-    }
+        }
+    };
+}
 
     private String toJson(Object payload) {
         try {

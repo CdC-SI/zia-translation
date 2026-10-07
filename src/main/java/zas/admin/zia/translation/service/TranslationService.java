@@ -70,6 +70,7 @@ public class TranslationService {
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize) {
+
         this.parsersByMimeType = buildParsersByMimeType(parsers);
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
@@ -128,7 +129,7 @@ public class TranslationService {
         });
     }
 
-    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
+    public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage, TranslationStrategy strategy) {
         validateTargetLanguage(targetLanguage);
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
         return Mono.fromCallable(() -> extractPages(file))
@@ -228,10 +229,6 @@ public class TranslationService {
         }
     }
 
-    private String translatePage(byte[] page, String targetLanguage, boolean renderAsMarkdown) {
-        return translatePages(List.of(page), targetLanguage, renderAsMarkdown).getFirst();
-    }
-
     private TranslationStrategy resolveStrategy(TranslationStrategy requestStrategy) {
         return requestStrategy != null ? requestStrategy : this.defaultStrategy;
     }
@@ -270,11 +267,10 @@ public class TranslationService {
         if (contentType != null) {
             parser = parsersByMimeType.get(contentType);
         }
-        if (parser == null) {
-            if (isPdf(bytes)) {
+        if (parser == null && isPdf(bytes)) {
                 parser = parsersByMimeType.get(PDF_MIME_TYPE);
             }
-        }
+
         if (parser == null) {
             throw new InvalidDocumentException(
                     "Unsupported file format: '%s'. Supported formats: %s."
