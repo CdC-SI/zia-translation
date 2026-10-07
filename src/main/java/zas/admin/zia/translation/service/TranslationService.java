@@ -143,7 +143,10 @@ public class TranslationService {
         return Flux.defer(() -> {
             Flux<String> tokenStream;
             if (strategy == TranslationStrategy.SINGLE) {
-                tokenStream = textTranslationService.translatePageSingleStrategyStream(page, targetLanguage);
+                tokenStream = Mono.fromCallable(() ->
+                                textTranslationService.translatePageSingleStrategyStream(page, targetLanguage))
+                        .subscribeOn(translationScheduler)
+                        .flatMapMany(stream -> stream);
             } else {
                 tokenStream = Mono.fromCallable(() -> ocrService.extractText(List.of(page)).getFirst())
                         .subscribeOn(translationScheduler)
