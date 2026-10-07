@@ -4,10 +4,9 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,13 +46,16 @@ public class TextTranslationService {
 
     private final ChatClient llmClient;
     private final ChatClient visionClient;
+    private final VisionImagePreprocessor imagePreprocessor;
 
     public TextTranslationService(
             @Qualifier("llmChatClient") ChatClient llmClient,
-            @Qualifier("visionChatClient") ChatClient visionClient) {
+            @Qualifier("visionChatClient") ChatClient visionClient,
+            VisionImagePreprocessor imagePreprocessor) {
 
         this.llmClient = llmClient;
         this.visionClient = visionClient;
+        this.imagePreprocessor = imagePreprocessor;
     }
 
     public List<String> translatePages(List<String> extractedPages, String targetLanguage) {
@@ -83,7 +85,7 @@ public class TextTranslationService {
         List<String> translated = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
             String prompt = promptTemplate.formatted(targetLanguage);
-            Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+            Media media = imagePreprocessor.toMedia(imageBytes);
             UserMessage message = UserMessage.builder()
                     .text(prompt)
                     .media(media)
@@ -125,7 +127,7 @@ public class TextTranslationService {
      */
     public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, String targetLanguage) {
         String prompt = SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage);
-        Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+        Media media = imagePreprocessor.toMedia(imageBytes);
         UserMessage message = UserMessage.builder()
                 .text(prompt)
                 .media(media)
