@@ -205,6 +205,56 @@ class TextTranslationServiceTest {
                 .verifyComplete();
     }
 
+    @Test
+    void translateText_returnsTranslation() {
+        stubLlmClient("Bonjour le monde");
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+
+        String result = service.translateText("Hello world", "fr");
+
+        assertThat(result).isEqualTo("Bonjour le monde");
+    }
+
+    @Test
+    void translateText_usesPlainPrompt_nonStreamedCall() {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("Translated plain text");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(promptCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        String result = service.translateText("Some text", "fr");
+
+        assertThat(result).isEqualTo("Translated plain text");
+        assertThat(promptCaptor.getValue())
+                .doesNotContain("Markdown")
+                .doesNotContain("headings")
+                .doesNotContain("tables");
+    }
+
+    @Test
+    void translateText_nullContent_returnsEmptyString() {
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn(null);
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(any(String.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        String result = service.translateText("text", "fr");
+
+        assertThat(result).isEmpty();
+    }
+
     private void stubLlmClient(String content) {
         ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
         when(callResponseSpec.content()).thenReturn(content);

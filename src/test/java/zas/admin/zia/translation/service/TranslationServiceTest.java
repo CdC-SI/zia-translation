@@ -73,12 +73,12 @@ class TranslationServiceTest {
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                "dual", "10MB");
+                "dual", "10MB", 20000);
 
         singleService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                "single", "10MB");
+                "single", "10MB", 20000);
     }
 
     // --- validation ---
@@ -104,7 +104,7 @@ class TranslationServiceTest {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                "dual", "1KB");
+                "dual", "1KB", 20000);
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
         MockMultipartFile file = new MockMultipartFile("file", "big.pdf", "application/pdf", bigContent);
@@ -238,6 +238,60 @@ class TranslationServiceTest {
         assertThat(result).containsExactly("single strategy result");
     }
 
+    // --- translatePlainText ---
+
+    @Test
+    void translatePlainText_validInput_returnsStrippedTranslation() {
+        when(textTranslationService.translateText("Hello", "fr")).thenReturn("  Bonjour  ");
+
+        String result = dualService.translatePlainText("Hello", "fr");
+
+        assertThat(result).isEqualTo("Bonjour");
+    }
+
+    @Test
+    void translatePlainText_nullTargetLanguage_throwsInvalidDocumentException() {
+        assertThatThrownBy(() -> dualService.translatePlainText("Hello", null))
+                .isInstanceOf(InvalidDocumentException.class)
+                .hasMessageContaining("Target language");
+    }
+
+    @Test
+    void translatePlainText_blankText_throwsInvalidDocumentException() {
+        assertThatThrownBy(() -> dualService.translatePlainText("   ", "fr"))
+                .isInstanceOf(InvalidDocumentException.class)
+                .hasMessageContaining("Text is missing or empty");
+    }
+
+    @Test
+    void translatePlainText_nullText_throwsInvalidDocumentException() {
+        assertThatThrownBy(() -> dualService.translatePlainText(null, "fr"))
+                .isInstanceOf(InvalidDocumentException.class)
+                .hasMessageContaining("Text is missing or empty");
+    }
+
+    @Test
+    void translatePlainText_textTooLong_throwsInvalidDocumentException() {
+        TranslationService service = new TranslationService(
+                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                "dual", "10MB", 10);
+
+        assertThatThrownBy(() -> service.translatePlainText("This text is way too long", "fr"))
+                .isInstanceOf(InvalidDocumentException.class)
+                .hasMessageContaining("exceeds maximum allowed");
+    }
+
+    @Test
+    void translatePlainText_llmThrowsRuntimeException_throwsTranslationProcessingException() {
+        when(textTranslationService.translateText(anyString(), anyString()))
+                .thenThrow(new RuntimeException("LLM unavailable"));
+
+        assertThatThrownBy(() -> dualService.translatePlainText("Hello", "fr"))
+                .isInstanceOf(TranslationProcessingException.class)
+                .hasMessageContaining("Failed to process text translation.");
+    }
+
     @Test
     void submitPdfTranslation_withExplicitSingleStrategy_overridesDualDefault() throws IOException {
         when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
@@ -298,7 +352,7 @@ class TranslationServiceTest {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                "invalid-strategy", "10MB"))
+                "invalid-strategy", "10MB", 20000))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("invalid-strategy");
     }
@@ -471,7 +525,7 @@ class TranslationServiceTest {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
-                "dual", "10MB"))
+                "dual", "10MB", 20000))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
     }
