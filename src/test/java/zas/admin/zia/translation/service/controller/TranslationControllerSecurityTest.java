@@ -13,10 +13,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.RestController;
 import zas.admin.zia.translation.service.TranslationService;
+import zas.admin.zia.translation.service.config.TranslatorAccess;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.job.JobStatus;
 
@@ -32,8 +34,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = {TranslationController.class, GlobalExceptionHandler.class})
 @AutoConfigureMockMvc(addFilters = false)
-@Import(TranslationControllerSecurityTest.MethodSecurityTestConfig.class)
+@Import({TranslationControllerSecurityTest.MethodSecurityTestConfig.class, TranslatorAccess.class})
+@TestPropertySource(properties = "zia.security.translator-groups="
+        + TranslationControllerSecurityTest.TRANSLATOR_GROUP + ";" + TranslationControllerSecurityTest.ADMIN_GROUP)
 class TranslationControllerSecurityTest {
+
+    static final String TRANSLATOR_GROUP =
+            "cn=TRANSLATOR,ou=DEV,ou=MyApp,ou=Applications,ou=Groups,dc=example,dc=org";
+    static final String ADMIN_GROUP =
+            "cn=ADMIN,ou=DEV,ou=MyApp,ou=Applications,ou=Groups,dc=example,dc=org";
+    private static final String OTHER_GROUP =
+            "cn=READER,ou=DEV,ou=MyApp,ou=Applications,ou=Groups,dc=example,dc=org";
+    private static final String TRANSLATOR_GROUP_OTHER_ENV =
+            "cn=TRANSLATOR,ou=TEST,ou=MyApp,ou=Applications,ou=Groups,dc=example,dc=org";
 
     @TestConfiguration
     @EnableMethodSecurity
@@ -47,8 +60,8 @@ class TranslationControllerSecurityTest {
     private TranslationService translationService;
 
     @Test
-    @WithMockUser(authorities = {"cn=OTHER", "cn=TRANSLATOR"})
-    void callerWithTranslatorRole_isAllowed() throws Exception {
+    @WithMockUser(authorities = {OTHER_GROUP, TRANSLATOR_GROUP})
+    void callerWithTranslatorGroup_isAllowed() throws Exception {
         when(translationService.getJobStatusResponse("job-1"))
                 .thenReturn(Optional.of(new TranslationJobResponse("job-1", JobStatus.PROCESSING)));
 
@@ -57,8 +70,18 @@ class TranslationControllerSecurityTest {
     }
 
     @Test
-    @WithMockUser(authorities = {"cn=OTHER", "ROLE_TRANSLATOR", "TRANSLATOR"})
-    void callerWithoutTranslatorRole_isForbidden() throws Exception {
+    @WithMockUser(authorities = ADMIN_GROUP)
+    void callerWithAdminGroup_isAllowed() throws Exception {
+        when(translationService.getJobStatusResponse("job-1"))
+                .thenReturn(Optional.of(new TranslationJobResponse("job-1", JobStatus.PROCESSING)));
+
+        mockMvc.perform(get("/api/translation/jobs/job-1/status"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(authorities = {OTHER_GROUP, TRANSLATOR_GROUP_OTHER_ENV, "cn=TRANSLATOR", "ROLE_TRANSLATOR"})
+    void callerWithoutConfiguredGroup_isForbidden() throws Exception {
         mockMvc.perform(get("/api/translation/jobs/job-1/status"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.status").value(403));
@@ -87,7 +110,7 @@ class TranslationControllerSecurityTest {
             assertThat(preAuthorize)
                     .as("%s must be annotated with @PreAuthorize", controller.getBeanClassName())
                     .isNotNull();
-            assertThat(preAuthorize.value()).isEqualTo(TranslationController.TRANSLATOR_AUTHORITY_CHECK);
+            assertThat(preAuthorize.value()).isEqualTo(TranslatorAccess.PRE_AUTHORIZE_EXPRESSION);
         }
     }
 }

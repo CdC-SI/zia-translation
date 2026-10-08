@@ -25,6 +25,7 @@ import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.TranslationStrategy;
 import zas.admin.zia.translation.service.TranslationService;
+import zas.admin.zia.translation.service.config.TranslatorAccess;
 import zas.admin.zia.translation.service.dto.PlainTextTranslationRequest;
 import zas.admin.zia.translation.service.dto.PlainTextTranslationResponse;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
@@ -39,10 +40,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
 @RequestMapping("/api/translation")
-@PreAuthorize(TranslationController.TRANSLATOR_AUTHORITY_CHECK)
+@PreAuthorize(TranslatorAccess.PRE_AUTHORIZE_EXPRESSION)
 class TranslationController {
-
-    static final String TRANSLATOR_AUTHORITY_CHECK = "hasAuthority('cn=TRANSLATOR')";
 
     private static final Logger log = LoggerFactory.getLogger(TranslationController.class);
 
