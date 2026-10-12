@@ -9,12 +9,18 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -26,10 +32,13 @@ class TextTranslationServiceTest {
     @Mock
     private ChatClient visionClient;
 
+    @Mock
+    private AcronymLookupTool acronymLookupTool;
+
     @Test
     void translatePages_singlePage_returnsTranslation() {
         stubLlmClient("Texte traduit");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Source text"), "fr");
 
@@ -39,7 +48,7 @@ class TextTranslationServiceTest {
     @Test
     void translatePages_multiplePages_returnsOneTranslationPerPage() {
         stubLlmClient("Translated");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Page 1", "Page 2", "Page 3"), "de");
 
@@ -57,7 +66,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePages(List.of("text"), "fr");
 
         assertThat(result).containsExactly("");
@@ -74,7 +83,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr");
 
         assertThat(result).containsExactly("Translated via vision");
@@ -93,7 +102,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePages(List.of("Some text"), "fr", false);
 
         assertThat(result).containsExactly("Plain translated text");
@@ -116,7 +125,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePages(List.of("Some text"), "fr", true);
 
         assertThat(result).containsExactly("# Markdown translated text");
@@ -136,7 +145,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", false);
 
         assertThat(result).containsExactly("Plain vision result");
@@ -159,7 +168,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", true);
 
         assertThat(result).containsExactly("# Vision markdown result");
@@ -177,7 +186,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
 
         StepVerifier.create(service.translatePageStream("Hello world", "fr"))
                 .expectNext("Bonjour")
@@ -197,12 +206,113 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
 
         StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, "de"))
                 .expectNext("Token1")
                 .expectNext("Token2")
                 .verifyComplete();
+    }
+
+    @Test
+    void translatePages_toolEnabled_offersAcronymToolWithTargetLanguage() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        withTool().translatePages(List.of("Die AHV"), "fr");
+
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "fr"));
+        assertThat(promptCaptor.getValue()).contains("lookup_acronyms").contains("Die AHV");
+    }
+
+    @Test
+    void translatePagesSingleStrategy_toolEnabled_offersAcronymTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(visionClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        withTool().translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "French");
+
+        verify(requestSpec).messages(messageCaptor.capture());
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "fr"));
+        assertThat(messageCaptor.getValue().getText()).contains("lookup_acronyms");
+    }
+
+    @Test
+    void translatePageStream_toolEnabled_offersAcronymTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Bonjour"));
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        StepVerifier.create(withTool().translatePageStream("Guten Tag", "de"))
+                .expectNext("Bonjour")
+                .verifyComplete();
+
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "de"));
+    }
+
+    @Test
+    void translatePageSingleStrategyStream_toolEnabled_offersAcronymTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Token"));
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        StepVerifier.create(withTool().translatePageSingleStrategyStream(new byte[]{1, 2, 3}, "it"))
+                .expectNext("Token")
+                .verifyComplete();
+
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "it"));
+    }
+
+    @Test
+    void translatePages_toolEnabledButLanguageNotInGlossary_doesNotOfferTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texto");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        withTool().translatePages(List.of("Die AHV"), "es");
+
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec, never()).tools(any());
+        assertThat(promptCaptor.getValue()).doesNotContain("lookup_acronyms");
+    }
+
+    @Test
+    void translatePages_toolDisabled_doesNotOfferTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        new TextTranslationService(llmClient, visionClient, Optional.empty()).translatePages(List.of("Die AHV"), "fr");
+
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec, never()).tools(any());
+        verify(requestSpec, never()).toolContext(any());
+        assertThat(promptCaptor.getValue()).doesNotContain("lookup_acronyms");
+    }
+
+    private TextTranslationService withTool() {
+        return new TextTranslationService(llmClient, visionClient, Optional.of(acronymLookupTool));
+    }
+
+    private static ChatClient.ChatClientRequestSpec selfReturningCallSpec(String content) {
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn(content);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+        return requestSpec;
+    }
+
+    private static ChatClient.ChatClientRequestSpec selfReturningStreamSpec(Flux<String> tokens) {
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        when(streamResponseSpec.content()).thenReturn(tokens);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+        return requestSpec;
     }
 
     private void stubLlmClient(String content) {

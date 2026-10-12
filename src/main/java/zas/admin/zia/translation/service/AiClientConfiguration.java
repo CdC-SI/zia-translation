@@ -1,6 +1,7 @@
 package zas.admin.zia.translation.service;
 
-import io.micrometer.observation.ObservationRegistry;
+import java.util.Map;
+
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.OpenAiChatModel;
@@ -11,7 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.retry.support.RetryTemplate;
 
-import java.util.Map;
+import io.micrometer.observation.ObservationRegistry;
 
 @Configuration
 class AiClientConfiguration {
@@ -22,12 +23,7 @@ class AiClientConfiguration {
             @Value("${zia.internal.vision.model}") String model,
             @Value("${zia.internal.api-key}") String apiKey,
             ObservationRegistry observationRegistry) {
-        OpenAiChatOptions options = OpenAiChatOptions.builder()
-                .model(model)
-                .reasoningEffort("high")
-                .extraBody(Map.of("thinking", Map.of("type", "enabled")))
-                .build();
-        return ChatClient.create(buildChatModel(baseUrl, apiKey, options, observationRegistry));
+        return ChatClient.create(buildChatModel(baseUrl, model, apiKey, observationRegistry));
     }
 
     @Bean("llmChatClient")
@@ -36,17 +32,17 @@ class AiClientConfiguration {
             @Value("${zia.internal.llm.model}") String model,
             @Value("${zia.internal.api-key}") String apiKey,
             ObservationRegistry observationRegistry) {
-        OpenAiChatOptions options = OpenAiChatOptions.builder()
-                .model(model)
-                .build();
-        return ChatClient.create(buildChatModel(baseUrl, apiKey, options, observationRegistry));
+        return ChatClient.create(buildChatModel(baseUrl, model, apiKey, observationRegistry));
     }
 
-    private static OpenAiChatModel buildChatModel(String baseUrl, String apiKey, OpenAiChatOptions options,
+    private static OpenAiChatModel buildChatModel(String baseUrl, String model, String apiKey, 
                                                    ObservationRegistry observationRegistry) {
         OpenAiApi api = OpenAiApi.builder()
                 .baseUrl(baseUrl)
                 .apiKey(apiKey)
+                .build();
+        OpenAiChatOptions options = OpenAiChatOptions.builder()
+                .model(model)
                 .build();
         ToolCallingManager toolCallingManager = ToolCallingManager.builder()
                 .observationRegistry(observationRegistry)

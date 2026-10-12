@@ -1,5 +1,7 @@
 package zas.admin.zia.translation.service.llm;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
@@ -8,12 +10,18 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
+import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
+import zas.admin.zia.translation.service.glossary.Glossary;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class TextTranslationService {
+
+    private static final Logger log = LoggerFactory.getLogger(TextTranslationService.class);
 
     private static final String TRANSLATE_PROMPT_TEMPLATE =
             """
@@ -45,15 +53,30 @@ public class TextTranslationService {
             Return only the translated text, without any commentary, formatting, or additional explanation.
             """;
 
+    // Placed before the translation prompt when the acronym lookup tool is offered.
+    private static final String ACRONYM_TOOL_INSTRUCTION =
+            """
+            If the source text is in German, French, Italian or English, call the lookup_acronyms tool once before translating,
+            with every acronym of the source text and the language of the source text.
+            For each acronym it finds, write one of its targetForms in the translation. Keep acronyms it does not find unchanged.
+
+            """;
+
     private final ChatClient llmClient;
     private final ChatClient visionClient;
+    private final Optional<AcronymLookupTool> acronymLookupTool;
 
+    /**
+     * @param acronymLookupTool present only when {@code zia.translation.glossary.tool-enabled=true}
+     */
     public TextTranslationService(
             @Qualifier("llmChatClient") ChatClient llmClient,
-            @Qualifier("visionChatClient") ChatClient visionClient) {
+            @Qualifier("visionChatClient") ChatClient visionClient,
+            Optional<AcronymLookupTool> acronymLookupTool) {
 
         this.llmClient = llmClient;
         this.visionClient = visionClient;
+        this.acronymLookupTool = acronymLookupTool;
     }
 
     public List<String> translatePages(List<String> extractedPages, String targetLanguage) {
@@ -62,11 +85,11 @@ public class TextTranslationService {
 
     public List<String> translatePages(List<String> extractedPages, String targetLanguage, boolean renderAsMarkdown) {
         String template = renderAsMarkdown ? TRANSLATE_PROMPT_TEMPLATE : TRANSLATE_PLAIN_PROMPT_TEMPLATE;
+        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         List<String> translated = new ArrayList<>(extractedPages.size());
         for (String pageText : extractedPages) {
-            String prompt = template.formatted(targetLanguage, pageText);
-            String result = llmClient.prompt()
-                    .user(prompt)
+            String prompt = withToolInstruction(template.formatted(targetLanguage, pageText), toolLanguage);
+            String result = withAcronymTool(llmClient.prompt().user(prompt), toolLanguage)
                     .call()
                     .content();
             translated.add(result != null ? result : "");
@@ -80,16 +103,16 @@ public class TextTranslationService {
 
     public List<String> translatePagesSingleStrategy(List<byte[]> pageImages, String targetLanguage, boolean renderAsMarkdown) {
         String promptTemplate = renderAsMarkdown ? SINGLE_STRATEGY_PROMPT_TEMPLATE : SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE;
+        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         List<String> translated = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
-            String prompt = promptTemplate.formatted(targetLanguage);
+            String prompt = withToolInstruction(promptTemplate.formatted(targetLanguage), toolLanguage);
             Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
             UserMessage message = UserMessage.builder()
                     .text(prompt)
                     .media(media)
                     .build();
-            String result = visionClient.prompt()
-                    .messages(message)
+            String result = withAcronymTool(visionClient.prompt().messages(message), toolLanguage)
                     .call()
                     .content();
             translated.add(result != null ? result : "");
@@ -101,9 +124,9 @@ public class TextTranslationService {
      * Streams the translation of a single text page token-by-token.
      */
     public Flux<String> translatePageStream(String extractedText, String targetLanguage) {
-        String prompt = TRANSLATE_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage, extractedText);
-        return llmClient.prompt()
-                .user(prompt)
+        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
+        String prompt = withToolInstruction(TRANSLATE_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage, extractedText), toolLanguage);
+        return withAcronymTool(llmClient.prompt().user(prompt), toolLanguage)
                 .stream()
                 .content();
     }
@@ -112,15 +135,47 @@ public class TextTranslationService {
      * Streams the translation of a single image page (single strategy) token-by-token.
      */
     public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, String targetLanguage) {
-        String prompt = SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage);
+        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
+        String prompt = withToolInstruction(SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage), toolLanguage);
         Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
         UserMessage message = UserMessage.builder()
                 .text(prompt)
                 .media(media)
                 .build();
-        return visionClient.prompt()
-                .messages(message)
+        return withAcronymTool(visionClient.prompt().messages(message), toolLanguage)
                 .stream()
                 .content();
+    }
+
+    /**
+     * The glossary language to look acronyms up for, or empty when the tool is disabled or the glossary
+     * doesn't cover the target language.
+     */
+    private Optional<String> acronymToolLanguage(String targetLanguage) {
+        if (acronymLookupTool.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> language = Glossary.languageCode(targetLanguage);
+        if (language.isEmpty()) {
+            log.info("Acronym lookup tool not offered: the glossary has no language matching '{}'", targetLanguage);
+        }
+        return language;
+    }
+
+    private static String withToolInstruction(String prompt, Optional<String> toolLanguage) {
+        return toolLanguage.isPresent() ? ACRONYM_TOOL_INSTRUCTION + prompt : prompt;
+    }
+
+    /**
+     * Offers the lookup_acronyms tool to the model. The target language goes in the tool context, which
+     * Spring AI hands to the tool method but never sends to the model.
+     */
+    private ChatClient.ChatClientRequestSpec withAcronymTool(ChatClient.ChatClientRequestSpec request, Optional<String> toolLanguage) {
+        if (toolLanguage.isEmpty()) {
+            return request;
+        }
+        return request
+                .tools(acronymLookupTool.orElseThrow())
+                .toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, toolLanguage.get()));
     }
 }
