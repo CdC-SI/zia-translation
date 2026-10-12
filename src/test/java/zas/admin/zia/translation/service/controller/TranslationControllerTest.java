@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -405,5 +406,93 @@ class TranslationControllerTest {
                 .andExpect(jsonPath("$.status").value(400))
                 .andExpect(jsonPath("$.message").value(
                         "Invalid value 'unknown' for parameter 'strategy'. Allowed values: single, dual"));
+    }
+
+    // --- plain-text translation ---
+
+    @Test
+    void translatePlainText_validRequest_returns200WithTranslatedText() throws Exception {
+        when(translationService.translatePlainText("Bonjour", "de")).thenReturn("Hallo");
+
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"Bonjour\",\"targetLanguage\":\"de\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.translatedText").value("Hallo"));
+    }
+
+    @Test
+    void translatePlainText_missingBody_returns400() throws Exception {
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void translatePlainText_malformedJson_returns400() throws Exception {
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not valid json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void translatePlainText_emptyText_returns400() throws Exception {
+        when(translationService.translatePlainText("", "fr"))
+                .thenThrow(new InvalidDocumentException("Text is missing or empty."));
+
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"\",\"targetLanguage\":\"fr\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void translatePlainText_missingTargetLanguage_returns400() throws Exception {
+        when(translationService.translatePlainText("Bonjour", null))
+                .thenThrow(new InvalidDocumentException("Target language is missing or empty."));
+
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"Bonjour\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void translatePlainText_textTooLong_returns400() throws Exception {
+        when(translationService.translatePlainText("x".repeat(30000), "fr"))
+                .thenThrow(new InvalidDocumentException("Text length (30000 characters) exceeds maximum allowed (20000 characters)."));
+
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"" + "x".repeat(30000) + "\",\"targetLanguage\":\"fr\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void translatePlainText_unsupportedContentType_returns415() throws Exception {
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("plain text body"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415));
+    }
+
+    @Test
+    void translatePlainText_llmFailure_returns422() throws Exception {
+        when(translationService.translatePlainText("Bonjour", "de"))
+                .thenThrow(new zas.admin.zia.translation.service.TranslationProcessingException(
+                        "Failed to process text translation.", new RuntimeException()));
+
+        mockMvc.perform(post("/api/translation/plain-text")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"Bonjour\",\"targetLanguage\":\"de\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422));
     }
 }

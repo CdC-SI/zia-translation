@@ -6,12 +6,11 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.glossary.Glossary;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +64,7 @@ public class TextTranslationService {
     private final ChatClient llmClient;
     private final ChatClient visionClient;
     private final Optional<AcronymLookupTool> acronymLookupTool;
+    private final VisionImagePreprocessor imagePreprocessor;
 
     /**
      * @param acronymLookupTool present only when {@code zia.translation.glossary.tool-enabled=true}
@@ -72,10 +72,12 @@ public class TextTranslationService {
     public TextTranslationService(
             @Qualifier("llmChatClient") ChatClient llmClient,
             @Qualifier("visionChatClient") ChatClient visionClient,
+            VisionImagePreprocessor imagePreprocessor,
             Optional<AcronymLookupTool> acronymLookupTool) {
 
         this.llmClient = llmClient;
         this.visionClient = visionClient;
+        this.imagePreprocessor = imagePreprocessor;
         this.acronymLookupTool = acronymLookupTool;
     }
 
@@ -107,7 +109,7 @@ public class TextTranslationService {
         List<String> translated = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
             String prompt = withToolInstruction(promptTemplate.formatted(targetLanguage), toolLanguage);
-            Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+            Media media = imagePreprocessor.toMedia(imageBytes);
             UserMessage message = UserMessage.builder()
                     .text(prompt)
                     .media(media)
@@ -118,6 +120,18 @@ public class TextTranslationService {
             translated.add(result != null ? result : "");
         }
         return translated;
+    }
+
+    /**
+     * Translates a single plain text in one blocking (non-streamed) LLM call.
+     */
+    public String translateText(String text, String targetLanguage) {
+        String prompt = TRANSLATE_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage, text);
+        String result = llmClient.prompt()
+                .user(prompt)
+                .call()
+                .content();
+        return result != null ? result : "";
     }
 
     /**
@@ -137,7 +151,7 @@ public class TextTranslationService {
     public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, String targetLanguage) {
         Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         String prompt = withToolInstruction(SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE.formatted(targetLanguage), toolLanguage);
-        Media media = new Media(MimeTypeUtils.IMAGE_PNG, new ByteArrayResource(imageBytes));
+        Media media = imagePreprocessor.toMedia(imageBytes);
         UserMessage message = UserMessage.builder()
                 .text(prompt)
                 .media(media)

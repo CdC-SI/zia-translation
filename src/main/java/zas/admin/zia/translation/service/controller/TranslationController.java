@@ -10,9 +10,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +25,9 @@ import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.TranslationStrategy;
 import zas.admin.zia.translation.service.TranslationService;
+import zas.admin.zia.translation.service.config.TranslatorAccess;
+import zas.admin.zia.translation.service.dto.PlainTextTranslationRequest;
+import zas.admin.zia.translation.service.dto.PlainTextTranslationResponse;
 import zas.admin.zia.translation.service.dto.TranslationCompleteEvent;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationPageEvent;
@@ -35,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
 @RequestMapping("/api/translation")
+@PreAuthorize(TranslatorAccess.PRE_AUTHORIZE_EXPRESSION)
 class TranslationController {
 
     private static final Logger log = LoggerFactory.getLogger(TranslationController.class);
@@ -151,21 +157,39 @@ class TranslationController {
                 });
     }
 
-    private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
-        return switch (event) {
-            case TranslationStreamEvent.Token token -> ServerSentEvent.<String>builder()
-                    .event("token")
-                    .data(toJson(token))
-                    .build();
-            case TranslationStreamEvent.PageComplete page -> {
-                totalPages.incrementAndGet();
-                yield ServerSentEvent.<String>builder()
-                        .event("page")
-                        .data(toJson(new TranslationPageEvent(page.pageNumber(), page.text())))
-                        .build();
-            }
-        };
+    @PostMapping(value = "/plain-text", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<PlainTextTranslationResponse> translatePlainText(@RequestBody PlainTextTranslationRequest request) {
+        String text = request != null ? request.text() : null;
+        String targetLanguage = request != null ? request.targetLanguage() : null;
+
+        log.info("Received synchronous plain-text translation request to language '{}' (text length={})",
+                sanitizeForLog(targetLanguage), text != null ? text.length() : 0);
+
+        String translatedText = translationService.translatePlainText(text, targetLanguage);
+
+        return ResponseEntity.ok(new PlainTextTranslationResponse(translatedText));
     }
+
+    private static String sanitizeForLog(String value) {
+        return value == null ? null : value.replace("\r", "\\r").replace("\n", "\\n");
+    }
+
+private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, TranslationStreamEvent event) {
+    return switch (event) {
+        case TranslationStreamEvent.Token(var ignored, String ignored1) -> ServerSentEvent.<String>builder()
+                .event("token")
+                .data(toJson(event))
+                .build();
+
+        case TranslationStreamEvent.PageComplete(var pageNumber, var text) -> {
+            totalPages.incrementAndGet();
+            yield ServerSentEvent.<String>builder()
+                    .event("page")
+                    .data(toJson(new TranslationPageEvent(pageNumber, text)))
+                    .build();
+        }
+    };
+}
 
     private String toJson(Object payload) {
         try {

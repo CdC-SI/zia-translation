@@ -7,9 +7,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.util.List;
 import java.util.Map;
@@ -35,10 +40,14 @@ class TextTranslationServiceTest {
     @Mock
     private AcronymLookupTool acronymLookupTool;
 
+    @Mock
+    private VisionImagePreprocessor imagePreprocessor;
+
     @Test
     void translatePages_singlePage_returnsTranslation() {
         stubLlmClient("Texte traduit");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Source text"), "fr");
 
@@ -48,7 +57,8 @@ class TextTranslationServiceTest {
     @Test
     void translatePages_multiplePages_returnsOneTranslationPerPage() {
         stubLlmClient("Translated");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Page 1", "Page 2", "Page 3"), "de");
 
@@ -66,7 +76,8 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePages(List.of("text"), "fr");
 
         assertThat(result).containsExactly("");
@@ -74,6 +85,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePagesSingleStrategy_singlePage_returnsTranslation() {
+        stubImagePreprocessor();
         ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
         when(callResponseSpec.content()).thenReturn("Translated via vision");
 
@@ -83,7 +95,8 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr");
 
         assertThat(result).containsExactly("Translated via vision");
@@ -102,7 +115,8 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePages(List.of("Some text"), "fr", false);
 
         assertThat(result).containsExactly("Plain translated text");
@@ -125,7 +139,8 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePages(List.of("Some text"), "fr", true);
 
         assertThat(result).containsExactly("# Markdown translated text");
@@ -134,6 +149,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePagesSingleStrategy_renderAsMarkdownFalse_doesNotIncludeMarkdownInstructions() {
+        stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
         ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
@@ -145,7 +161,8 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", false);
 
         assertThat(result).containsExactly("Plain vision result");
@@ -157,6 +174,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePagesSingleStrategy_renderAsMarkdownTrue_includesMarkdownInstructions() {
+        stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
         ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
@@ -168,7 +186,8 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr", true);
 
         assertThat(result).containsExactly("# Vision markdown result");
@@ -186,7 +205,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         StepVerifier.create(service.translatePageStream("Hello world", "fr"))
                 .expectNext("Bonjour")
@@ -197,6 +216,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePageSingleStrategyStream_streamsTokens() {
+        stubImagePreprocessor();
         ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
         when(streamResponseSpec.content()).thenReturn(Flux.just("Token1", "Token2"));
 
@@ -206,7 +226,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, Optional.empty());
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, "de"))
                 .expectNext("Token1")
@@ -230,6 +250,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePagesSingleStrategy_toolEnabled_offersAcronymTool() {
+        stubImagePreprocessor();
         ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
         when(visionClient.prompt()).thenReturn(requestSpec);
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
@@ -257,6 +278,7 @@ class TextTranslationServiceTest {
 
     @Test
     void translatePageSingleStrategyStream_toolEnabled_offersAcronymTool() {
+        stubImagePreprocessor();
         ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Token"));
         when(visionClient.prompt()).thenReturn(requestSpec);
 
@@ -287,7 +309,7 @@ class TextTranslationServiceTest {
         when(llmClient.prompt()).thenReturn(requestSpec);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
 
-        new TextTranslationService(llmClient, visionClient, Optional.empty()).translatePages(List.of("Die AHV"), "fr");
+        new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty()).translatePages(List.of("Die AHV"), "fr");
 
         verify(requestSpec).user(promptCaptor.capture());
         verify(requestSpec, never()).tools(any());
@@ -296,7 +318,7 @@ class TextTranslationServiceTest {
     }
 
     private TextTranslationService withTool() {
-        return new TextTranslationService(llmClient, visionClient, Optional.of(acronymLookupTool));
+        return new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.of(acronymLookupTool));
     }
 
     private static ChatClient.ChatClientRequestSpec selfReturningCallSpec(String content) {
@@ -313,6 +335,108 @@ class TextTranslationServiceTest {
         ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
         when(requestSpec.stream()).thenReturn(streamResponseSpec);
         return requestSpec;
+        }
+
+    @Test
+    void translatePagesSingleStrategy_usesPreprocessedJpegMedia() {
+        stubImagePreprocessor();
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("Translated via vision");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.messages(messageCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+        service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), "fr");
+
+        verify(imagePreprocessor).toMedia(any(byte[].class));
+        UserMessage message = (UserMessage) messageCaptor.getValue();
+        assertThat(message.getMedia().get(0).getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
+    }
+
+    @Test
+    void translatePageSingleStrategyStream_usesPreprocessedJpegMedia() {
+        stubImagePreprocessor();
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        when(streamResponseSpec.content()).thenReturn(Flux.just("Token1"));
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.messages(messageCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
+        StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, "de"))
+                .expectNext("Token1")
+                .verifyComplete();
+
+        verify(imagePreprocessor).toMedia(any(byte[].class));
+        UserMessage message = (UserMessage) messageCaptor.getValue();
+        assertThat(message.getMedia().get(0).getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
+    }
+
+    private void stubImagePreprocessor() {
+        Media jpegMedia = new Media(MimeTypeUtils.IMAGE_JPEG, new ByteArrayResource(new byte[]{9, 9, 9}));
+        when(imagePreprocessor.toMedia(any(byte[].class))).thenReturn(jpegMedia);
+    }
+
+    @Test
+    void translateText_returnsTranslation() {
+        stubLlmClient("Bonjour le monde");
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+
+        String result = service.translateText("Hello world", "fr");
+
+        assertThat(result).isEqualTo("Bonjour le monde");
+    }
+
+    @Test
+    void translateText_usesPlainPrompt_nonStreamedCall() {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn("Translated plain text");
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(promptCaptor.capture())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+        String result = service.translateText("Some text", "fr");
+
+        assertThat(result).isEqualTo("Translated plain text");
+        assertThat(promptCaptor.getValue())
+                .doesNotContain("Markdown")
+                .doesNotContain("headings")
+                .doesNotContain("tables");
+    }
+
+    @Test
+    void translateText_nullContent_returnsEmptyString() {
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn(null);
+
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        when(requestSpec.user(any(String.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
+        String result = service.translateText("text", "fr");
+
+        assertThat(result).isEmpty();
     }
 
     private void stubLlmClient(String content) {
