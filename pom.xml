@@ -98,7 +98,7 @@
                 <dependency>
                     <groupId>ch.admin.zas.commons</groupId>
                     <artifactId>zas-common-security-starter</artifactId>
-                    <version>3.5.8</version>
+                    <version>4.0.0</version>
                 </dependency>
             </dependencies>
         </profile>
