@@ -1,4 +1,4 @@
-FROM docker-commons.zas.admin.ch/zas/imagebase/application/java:21-openjdk-headless-ubi-2.7.0
+FROM docker-commons.zas.admin.ch/zas/imagebase/application/java:25-openjdk-headless-ubi-2.10.0
 COPY target/zia-translation.jar /app/
 CMD java \
     -XX:+UseG1GC \
