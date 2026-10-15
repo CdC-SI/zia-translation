@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.14</version>
+        <version>4.1.1</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
 
@@ -15,9 +15,8 @@
     <name>zia-translation</name>
 
     <properties>
-        <java.version>21</java.version>
-        <spring-ai.version>1.1.7</spring-ai.version>
-        <tomcat.version>10.1.55</tomcat.version>
+        <java.version>25</java.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
     </properties>
 
     <dependencyManagement>
@@ -28,11 +27,6 @@
                 <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.modelcontextprotocol.sdk</groupId>
-                <artifactId>mcp-json-jackson2</artifactId>
-                <version>1.0.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -48,7 +42,7 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
@@ -81,8 +75,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.springframework.security</groupId>
-            <artifactId>spring-security-test</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -99,7 +98,7 @@
                 <dependency>
                     <groupId>ch.admin.zas.commons</groupId>
                     <artifactId>zas-common-security-starter</artifactId>
-                    <version>3.5.8</version>
+                    <version>4.0.0</version>
                 </dependency>
             </dependencies>
         </profile>

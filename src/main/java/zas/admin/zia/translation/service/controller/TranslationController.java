@@ -1,7 +1,7 @@
 package zas.admin.zia.translation.service.controller;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
@@ -194,7 +194,7 @@ private ServerSentEvent<String> toSseEvent(AtomicInteger totalPages, Translation
     private String toJson(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException("Failed to serialize SSE payload", exception);
         }
     }
