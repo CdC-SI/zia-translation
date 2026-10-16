@@ -8,12 +8,14 @@ import com.vladsch.flexmark.util.data.MutableDataSet;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+import zas.admin.zia.translation.service.language.TargetLanguage;
 import zas.admin.zia.translation.service.parser.PageLayout;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +23,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class PdfGenerationService {
@@ -34,23 +37,35 @@ public class PdfGenerationService {
     private static final float TABLE_CELL_PADDING = 5f;
     private static final float TABLE_BORDER_WIDTH = 0.5f;
     private static final float HEADER_BACKGROUND_GRAY = 0.93f;
+    private static final float FOOTER_FONT_SIZE = 8f;
+    private static final float FOOTER_LINE_HEIGHT = 10f;
+    private static final float FOOTER_BASELINE_Y = 20f;
+    private static final float FOOTER_TEXT_GRAY = 0.45f;
 
     private final String fontPath;
+    private final PdfFooterTexts footerTexts;
     private final Parser markdownParser;
 
     public PdfGenerationService(
-            @Value("${zia.translation.pdf.font-path:fonts/Arial.ttf}") String fontPath) {
+            @Value("${zia.translation.pdf.font-path:fonts/Arial.ttf}") String fontPath,
+            PdfFooterTexts footerTexts) {
         this.fontPath = fontPath;
+        this.footerTexts = footerTexts;
         MutableDataSet options = new MutableDataSet();
         options.set(Parser.EXTENSIONS, List.of(TablesExtension.create()));
         this.markdownParser = Parser.builder(options).build();
     }
 
-    public byte[] generatePdf(List<String> markdownPages) throws IOException {
-        return generatePdf(markdownPages, List.of());
+    public byte[] generatePdf(List<String> markdownPages, TargetLanguage targetLanguage) throws IOException {
+        return generatePdf(markdownPages, List.of(), targetLanguage);
     }
 
-    public byte[] generatePdf(List<String> markdownPages, List<PageLayout> pageLayouts) throws IOException {
+    /**
+     * Renders the translated Markdown pages to a PDF and stamps the AI-translation footer
+     * configured for {@code targetLanguage} on every page.
+     */
+    public byte[] generatePdf(List<String> markdownPages, List<PageLayout> pageLayouts,
+                              TargetLanguage targetLanguage) throws IOException {
         try (PDDocument document = new PDDocument()) {
             PDFont font = loadFont(document);
             for (int i = 0; i < markdownPages.size(); i++) {
@@ -61,9 +76,34 @@ public class PdfGenerationService {
             if (document.getNumberOfPages() == 0) {
                 document.addPage(new PDPage(PDRectangle.A4));
             }
+            Optional<String> footer = footerTexts.forLanguage(targetLanguage);
+            if (footer.isPresent()) {
+                addFooter(document, font, footer.get());
+            }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             document.save(out);
             return out.toByteArray();
+        }
+    }
+
+    private void addFooter(PDDocument document, PDFont font, String footerText) throws IOException {
+        String encodableText = filterUnencodable(footerText, font);
+        for (PDPage page : document.getPages()) {
+            float pageWidth = page.getMediaBox().getWidth();
+            List<String> lines = splitIntoLines(font, encodableText, FOOTER_FONT_SIZE, pageWidth - 2 * MARGIN);
+            float y = FOOTER_BASELINE_Y + (lines.size() - 1) * FOOTER_LINE_HEIGHT;
+            try (PDPageContentStream cs = new PDPageContentStream(document, page, AppendMode.APPEND, true, true)) {
+                cs.setNonStrokingColor(FOOTER_TEXT_GRAY, FOOTER_TEXT_GRAY, FOOTER_TEXT_GRAY);
+                for (String line : lines) {
+                    float lineWidth = font.getStringWidth(line) / 1000f * FOOTER_FONT_SIZE;
+                    cs.beginText();
+                    cs.setFont(font, FOOTER_FONT_SIZE);
+                    cs.newLineAtOffset((pageWidth - lineWidth) / 2, y);
+                    cs.showText(line);
+                    cs.endText();
+                    y -= FOOTER_LINE_HEIGHT;
+                }
+            }
         }
     }
 
@@ -254,6 +294,26 @@ public class PdfGenerationService {
         return sb.toString();
     }
 
+    private static List<String> splitIntoLines(PDFont font, String text, float fontSize, float maxWidth) throws IOException {
+        List<String> result = new ArrayList<>();
+        for (String paragraph : text.split("\n", -1)) {
+            String[] words = paragraph.split(" ", -1);
+            StringBuilder current = new StringBuilder();
+            for (String word : words) {
+                String candidate = current.isEmpty() ? word : current + " " + word;
+                float width = font.getStringWidth(candidate) / 1000f * fontSize;
+                if (width > maxWidth && !current.isEmpty()) {
+                    result.add(current.toString());
+                    current = new StringBuilder(word);
+                } else {
+                    current = new StringBuilder(candidate);
+                }
+            }
+            result.add(current.toString());
+        }
+        return result;
+    }
+
     private PDFont loadFont(PDDocument document) throws IOException {
         try (InputStream fontStream = new ClassPathResource(fontPath).getInputStream()) {
             return PDType0Font.load(document, fontStream);
@@ -313,7 +373,7 @@ public class PdfGenerationService {
         void writeWrappedText(String text, float fontSize, float leftMargin) throws IOException {
             float lineHeight = fontSize * LINE_HEIGHT_FACTOR;
             float maxWidth = pageWidth - leftMargin - MARGIN;
-            List<String> lines = splitIntoLines(filterUnencodable(text, font), fontSize, maxWidth);
+            List<String> lines = splitIntoLines(font, filterUnencodable(text, font), fontSize, maxWidth);
             for (String line : lines) {
                 ensureSpace(lineHeight);
                 cs.beginText();
@@ -354,26 +414,6 @@ public class PdfGenerationService {
             cs.newLineAtOffset(x, y);
             cs.showText(text);
             cs.endText();
-        }
-
-        private List<String> splitIntoLines(String text, float fontSize, float maxWidth) throws IOException {
-            List<String> result = new ArrayList<>();
-            for (String paragraph : text.split("\n", -1)) {
-                String[] words = paragraph.split(" ", -1);
-                StringBuilder current = new StringBuilder();
-                for (String word : words) {
-                    String candidate = current.isEmpty() ? word : current + " " + word;
-                    float width = font.getStringWidth(candidate) / 1000f * fontSize;
-                    if (width > maxWidth && !current.isEmpty()) {
-                        result.add(current.toString());
-                        current = new StringBuilder(word);
-                    } else {
-                        current = new StringBuilder(candidate);
-                    }
-                }
-                result.add(current.toString());
-            }
-            return result;
         }
 
         void close() throws IOException {

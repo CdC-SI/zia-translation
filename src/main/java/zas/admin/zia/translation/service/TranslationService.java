@@ -19,6 +19,8 @@ import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
+import zas.admin.zia.translation.service.language.TargetLanguage;
+import zas.admin.zia.translation.service.language.TargetLanguageResolver;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.parser.DocumentParser;
@@ -55,6 +57,7 @@ public class TranslationService {
     private final TranslationJobStore translationJobStore;
     private final PdfStorageService pdfStorageService;
     private final MarkdownStorageService markdownStorageService;
+    private final TargetLanguageResolver targetLanguageResolver;
     private final Executor translationTaskExecutor;
     private final Scheduler translationScheduler;
     private final TranslationStrategy defaultStrategy;
@@ -69,6 +72,7 @@ public class TranslationService {
             TranslationJobStore translationJobStore,
             PdfStorageService pdfStorageService,
             MarkdownStorageService markdownStorageService,
+            TargetLanguageResolver targetLanguageResolver,
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize,
@@ -81,6 +85,7 @@ public class TranslationService {
         this.translationJobStore = translationJobStore;
         this.pdfStorageService = pdfStorageService;
         this.markdownStorageService = markdownStorageService;
+        this.targetLanguageResolver = targetLanguageResolver;
         this.translationTaskExecutor = translationTaskExecutor;
         this.translationScheduler = Schedulers.fromExecutor(translationTaskExecutor);
         this.defaultStrategy = TranslationStrategy.fromString(strategy);
@@ -89,27 +94,27 @@ public class TranslationService {
     }
 
     public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
-        validateTargetLanguage(targetLanguage);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
         TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.PDF);
 
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
-        CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, targetLanguage, resolvedStrategy), translationTaskExecutor);
+        CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, language, resolvedStrategy), translationTaskExecutor);
 
         return toResponse(job);
     }
 
     public TranslationJobResponse submitMarkdownTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
-        validateTargetLanguage(targetLanguage);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
         TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN);
 
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
-        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, targetLanguage, resolvedStrategy), translationTaskExecutor);
+        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, language, resolvedStrategy), translationTaskExecutor);
 
         return toResponse(job);
     }
@@ -134,15 +139,15 @@ public class TranslationService {
     }
 
     public Flux<TranslationStreamEvent> translateToTextStream(MultipartFile file, String targetLanguage, TranslationStrategy strategy) {
-        validateTargetLanguage(targetLanguage);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
         return Mono.fromCallable(() -> extractPages(file))
                 .subscribeOn(translationScheduler)
                 .flatMapMany(pages -> Flux.range(0, pages.size())
-                        .concatMap(index -> streamPageTranslation(pages.get(index), targetLanguage, index + 1, resolvedStrategy)));
+                        .concatMap(index -> streamPageTranslation(pages.get(index), language, index + 1, resolvedStrategy)));
     }
 
-    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, String targetLanguage, int pageNumber, TranslationStrategy strategy) {
+    private Flux<TranslationStreamEvent> streamPageTranslation(byte[] page, TargetLanguage targetLanguage, int pageNumber, TranslationStrategy strategy) {
         return Flux.defer(() -> {
             Flux<String> tokenStream;
             if (strategy == TranslationStrategy.SINGLE) {
@@ -168,22 +173,22 @@ public class TranslationService {
     }
 
     public List<String> translateToText(MultipartFile file, String targetLanguage) throws IOException {
-        validateTargetLanguage(targetLanguage);
-        return translatePages(extractPages(file), targetLanguage, false);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
+        return translatePages(extractPages(file), language, false);
     }
 
     public String translatePlainText(String text, String targetLanguage) {
-        validateTargetLanguage(targetLanguage);
         validateText(text);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         try {
-            return textTranslationService.translateText(text, targetLanguage).strip();
+            return textTranslationService.translateText(text, language).strip();
         } catch (RuntimeException ex) {
             throw new TranslationProcessingException("Failed to process text translation.", ex);
         }
     }
 
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
-        validateTargetLanguage(targetLanguage);
+        TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
         List<PageLayout> pageLayouts;
@@ -194,17 +199,17 @@ public class TranslationService {
         } catch (IOException exception) {
             throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
         }
-        List<String> translatedPages = translatePages(pages, targetLanguage, true);
-        return pdfGenerationService.generatePdf(translatedPages, pageLayouts);
+        List<String> translatedPages = translatePages(pages, language, true);
+        return pdfGenerationService.generatePdf(translatedPages, pageLayouts, language);
     }
 
-    private void processPdfJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage, TranslationStrategy strategy) {
+    private void processPdfJob(String jobId, DocumentParser parser, byte[] bytes, TargetLanguage targetLanguage, TranslationStrategy strategy) {
         translationJobStore.markProcessing(jobId);
         try {
             List<PageLayout> pageLayouts = parser.extractPageLayouts(bytes);
             List<byte[]> pages = parser.renderPages(bytes);
             List<String> translatedPages = translatePages(pages, targetLanguage, true, strategy);
-            byte[] generatedPdf = pdfGenerationService.generatePdf(translatedPages, pageLayouts);
+            byte[] generatedPdf = pdfGenerationService.generatePdf(translatedPages, pageLayouts, targetLanguage);
             pdfStorageService.store(jobId, generatedPdf);
             translationJobStore.markCompleted(jobId);
         } catch (Exception exception) {
@@ -213,7 +218,7 @@ public class TranslationService {
         }
     }
 
-    private void processMarkdownJob(String jobId, DocumentParser parser, byte[] bytes, String targetLanguage, TranslationStrategy strategy) {
+    private void processMarkdownJob(String jobId, DocumentParser parser, byte[] bytes, TargetLanguage targetLanguage, TranslationStrategy strategy) {
         translationJobStore.markProcessing(jobId);
         try {
             List<byte[]> pages = parser.renderPages(bytes);
@@ -231,11 +236,11 @@ public class TranslationService {
         return String.join(MARKDOWN_PAGE_SEPARATOR, pages);
     }
 
-    private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown) {
+    private List<String> translatePages(List<byte[]> pages, TargetLanguage targetLanguage, boolean renderAsMarkdown) {
         return translatePages(pages, targetLanguage, renderAsMarkdown, defaultStrategy);
     }
 
-    private List<String> translatePages(List<byte[]> pages, String targetLanguage, boolean renderAsMarkdown, TranslationStrategy strategy) {
+    private List<String> translatePages(List<byte[]> pages, TargetLanguage targetLanguage, boolean renderAsMarkdown, TranslationStrategy strategy) {
         try {
             if (strategy == TranslationStrategy.SINGLE) {
                 return textTranslationService.translatePagesSingleStrategy(pages, targetLanguage, renderAsMarkdown);
@@ -273,12 +278,6 @@ public class TranslationService {
                     "File size (%d bytes) exceeds maximum allowed (%d bytes).".formatted(bytes.length, maxFileSizeBytes));
         }
         return bytes;
-    }
-
-    private void validateTargetLanguage(String targetLanguage) {
-        if (targetLanguage == null || targetLanguage.isBlank()) {
-            throw new InvalidDocumentException("Target language is missing or empty.");
-        }
     }
 
     private void validateText(String text) {

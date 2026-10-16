@@ -28,8 +28,7 @@ paths:
                   format: binary
                   description: Source PDF document
                 targetLanguage:
-                  type: string
-                  description: Target language code (e.g. fr, en, de)
+                  $ref: '#/components/schemas/TargetLanguage'
                 strategy:
                   $ref: '#/components/schemas/TranslationStrategy'
       responses:
@@ -40,7 +39,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TranslationJobResponse'
         '400':
-          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
+          description: Bad request — missing file, empty file, unsupported format, or unknown strategy value
           content:
             application/json:
               schema:
@@ -119,8 +118,7 @@ paths:
                   format: binary
                   description: Source document
                 targetLanguage:
-                  type: string
-                  description: Target language code (e.g. fr, en, de)
+                  $ref: '#/components/schemas/TargetLanguage'
                 strategy:
                   $ref: '#/components/schemas/TranslationStrategy'
       responses:
@@ -131,7 +129,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TranslationJobResponse'
         '400':
-          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
+          description: Bad request — missing file, empty file, unsupported format, or unknown strategy value
           content:
             application/json:
               schema:
@@ -209,8 +207,7 @@ paths:
                   format: binary
                   description: Source PDF document
                 targetLanguage:
-                  type: string
-                  description: Target language code (e.g. fr, en, de)
+                  $ref: '#/components/schemas/TargetLanguage'
                 strategy:
                   $ref: '#/components/schemas/TranslationStrategy'
       responses:
@@ -233,7 +230,7 @@ paths:
                     event: complete
                     data: {"totalPages":1}
         '400':
-          description: Bad request — missing file, empty file, unsupported format, missing targetLanguage, or unknown strategy value
+          description: Bad request — missing file, empty file, unsupported format, or unknown strategy value
           content:
             application/json:
               schema:
@@ -257,7 +254,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlainTextTranslationResponse'
         '400':
-          description: Bad request — missing/unreadable body, missing or empty `text`/`targetLanguage`, or `text` too long
+          description: Bad request — missing/unreadable body, missing or empty `text`, or `text` too long
           content:
             application/json:
               schema:
@@ -285,6 +282,21 @@ components:
       enum:
         - single
         - dual
+
+    TargetLanguage:
+      type: string
+      description: >
+        Target language. Supported languages: French (`fr`), German (`de`), Italian (`it`)
+        and English (`en`). ISO 639-1/639-2 codes, regional variants (e.g. `de-CH`) and common
+        language names in fr/de/it/en (e.g. `Deutsch`, `allemand`, `German`) are accepted,
+        case- and accent-insensitive. If omitted, blank or unsupported, the default language
+        (`zia.translation.default-language`, env `ZIA_TRANSLATION_DEFAULT_LANGUAGE`) is used.
+        Generated PDFs include an AI-translation disclaimer footer in the resolved language.
+      examples:
+        - fr
+        - de
+        - it
+        - en
 
     TranslationJobResponse:
       type: object
@@ -330,14 +342,12 @@ components:
       type: object
       required:
         - text
-        - targetLanguage
       properties:
         text:
           type: string
           description: Source plain text to translate
         targetLanguage:
-          type: string
-          description: Target language code (e.g. fr, en, de)
+          $ref: '#/components/schemas/TargetLanguage'
 
     PlainTextTranslationResponse:
       type: object

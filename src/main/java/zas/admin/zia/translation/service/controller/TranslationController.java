@@ -56,7 +56,7 @@ class TranslationController {
     @PostMapping("/pdf")
     ResponseEntity<TranslationJobResponse> translateToPdf(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "targetLanguage", required = false) String targetLanguage,
             @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received async request to translate file '{}' to language '{}'", file.getOriginalFilename(), targetLanguage);
@@ -69,7 +69,7 @@ class TranslationController {
     @PostMapping("/md")
     ResponseEntity<TranslationJobResponse> translateToMarkdown(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "targetLanguage", required = false) String targetLanguage,
             @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received async request to translate file '{}' to Markdown in language '{}'", file.getOriginalFilename(), targetLanguage);
@@ -131,7 +131,7 @@ class TranslationController {
     @PostMapping(value = "/text", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     Flux<ServerSentEvent<String>> translateToText(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("targetLanguage") String targetLanguage,
+            @RequestParam(name = "targetLanguage", required = false) String targetLanguage,
             @RequestParam(name = "strategy", required = false) TranslationStrategy strategy) throws IOException {
 
         log.info("Received request to stream translated text for file '{}' to language '{}'", file.getOriginalFilename(), targetLanguage);
