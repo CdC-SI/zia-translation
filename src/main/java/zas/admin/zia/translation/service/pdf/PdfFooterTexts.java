@@ -23,6 +23,7 @@ public class PdfFooterTexts {
             @Value("${zia.translation.pdf.footer.de:}") String de,
             @Value("${zia.translation.pdf.footer.it:}") String it,
             @Value("${zia.translation.pdf.footer.en:}") String en) {
+
         this.texts = new EnumMap<>(TargetLanguage.class);
         this.texts.put(TargetLanguage.FR, nullToEmpty(fr));
         this.texts.put(TargetLanguage.DE, nullToEmpty(de));
