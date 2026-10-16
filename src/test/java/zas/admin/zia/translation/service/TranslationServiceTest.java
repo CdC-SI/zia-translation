@@ -14,6 +14,8 @@ import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
 import zas.admin.zia.translation.service.job.TranslationJobStore;
+import zas.admin.zia.translation.service.language.TargetLanguage;
+import zas.admin.zia.translation.service.language.TargetLanguageResolver;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
@@ -74,12 +76,12 @@ class TranslationServiceTest {
 
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 20000);
 
         singleService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "single", "10MB", 20000);
     }
 
@@ -105,7 +107,7 @@ class TranslationServiceTest {
     void translateToText_fileTooLarge_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "1KB", 20000);
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
@@ -135,7 +137,7 @@ class TranslationServiceTest {
     void translateToText_noContentTypeButPdfMagicBytes_resolvesParserSuccessfully() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("translated"));
 
         MockMultipartFile file = new MockMultipartFile("file", "doc.pdf", null, PDF_BYTES);
 
@@ -148,7 +150,7 @@ class TranslationServiceTest {
     void resolveParser_imageContentType_resolvesImageParser() throws IOException {
         when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("translated"));
 
         MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", new byte[]{1, 2, 3});
 
@@ -190,7 +192,7 @@ class TranslationServiceTest {
     void translateToText_translationThrowsRuntimeException_throwsTranslationProcessingException() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenThrow(new RuntimeException("LLM failure"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenThrow(new RuntimeException("LLM failure"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
@@ -218,7 +220,7 @@ class TranslationServiceTest {
     void translateToText_dualStrategy_callsOcrThenTranslate() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("translated text"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("translated text"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
@@ -230,7 +232,7 @@ class TranslationServiceTest {
     @Test
     void translateToText_singleStrategy_callsTranslatePagesSingleStrategy() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
-        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(false)))
+        when(textTranslationService.translatePagesSingleStrategy(any(), any(TargetLanguage.class), eq(false)))
                 .thenReturn(List.of("single strategy result"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
@@ -244,7 +246,7 @@ class TranslationServiceTest {
 
     @Test
     void translatePlainText_validInput_returnsStrippedTranslation() {
-        when(textTranslationService.translateText("Hello", "fr")).thenReturn("  Bonjour  ");
+        when(textTranslationService.translateText("Hello", TargetLanguage.FR)).thenReturn("  Bonjour  ");
 
         String result = dualService.translatePlainText("Hello", "fr");
 
@@ -252,10 +254,58 @@ class TranslationServiceTest {
     }
 
     @Test
-    void translatePlainText_nullTargetLanguage_throwsInvalidDocumentException() {
-        assertThatThrownBy(() -> dualService.translatePlainText("Hello", null))
-                .isInstanceOf(InvalidDocumentException.class)
-                .hasMessageContaining("Target language");
+    void translatePlainText_nullTargetLanguage_fallsBackToDefaultLanguage() {
+        when(textTranslationService.translateText("Hello", TargetLanguage.FR)).thenReturn("Bonjour");
+
+        String result = dualService.translatePlainText("Hello", null);
+
+        assertThat(result).isEqualTo("Bonjour");
+    }
+
+    @Test
+    void translatePlainText_unsupportedTargetLanguage_fallsBackToDefaultLanguage() {
+        when(textTranslationService.translateText("Hello", TargetLanguage.FR)).thenReturn("Bonjour");
+
+        String result = dualService.translatePlainText("Hello", "klingon");
+
+        assertThat(result).isEqualTo("Bonjour");
+    }
+
+    @Test
+    void translatePlainText_languageName_resolvedToSupportedLanguage() {
+        when(textTranslationService.translateText("Hello", TargetLanguage.DE)).thenReturn("Hallo");
+
+        String result = dualService.translatePlainText("Hello", "Deutsch");
+
+        assertThat(result).isEqualTo("Hallo");
+    }
+
+    @Test
+    void translateToText_resolvesTargetLanguageBeforeCallingLlm() throws IOException {
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), eq(TargetLanguage.IT), eq(false))).thenReturn(List.of("testo"));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        assertThat(dualService.translateToText(file, "IT")).containsExactly("testo");
+    }
+
+    @Test
+    void submitPdfTranslation_passesResolvedLanguageToPdfGeneration() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF))
+                .thenReturn(new TranslationJob("job-lang", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.PDF));
+        when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(pdfParser.extractPageLayouts(any())).thenReturn(List.of());
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), eq(TargetLanguage.EN), eq(true))).thenReturn(List.of("text"));
+        when(pdfGenerationService.generatePdf(any(), any(), eq(TargetLanguage.EN))).thenReturn(new byte[]{1});
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+        dualService.submitPdfTranslation(file, "english", null);
+
+        verify(pdfGenerationService).generatePdf(any(), any(), eq(TargetLanguage.EN));
+        verify(translationJobStore).markCompleted("job-lang");
     }
 
     @Test
@@ -276,7 +326,7 @@ class TranslationServiceTest {
     void translatePlainText_textTooLong_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 10);
 
         assertThatThrownBy(() -> service.translatePlainText("This text is way too long", "fr"))
@@ -286,7 +336,7 @@ class TranslationServiceTest {
 
     @Test
     void translatePlainText_llmThrowsRuntimeException_throwsTranslationProcessingException() {
-        when(textTranslationService.translateText(anyString(), anyString()))
+        when(textTranslationService.translateText(anyString(), any(TargetLanguage.class)))
                 .thenThrow(new RuntimeException("LLM unavailable"));
 
         assertThatThrownBy(() -> dualService.translatePlainText("Hello", "fr"))
@@ -297,7 +347,7 @@ class TranslationServiceTest {
     @Test
     void translateToTextStream_singleStrategy_mapsImagePreprocessingFailure() throws IOException {
         when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
-        when(textTranslationService.translatePageSingleStrategyStream(any(), anyString()))
+        when(textTranslationService.translatePageSingleStrategyStream(any(), any(TargetLanguage.class)))
                 .thenThrow(new ImagePreprocessingException("invalid image"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", new byte[]{1});
@@ -331,15 +381,15 @@ class TranslationServiceTest {
                 new TranslationJob("job-1", JobStatus.PENDING, java.time.Instant.now(), null, null, JobOutputFormat.PDF));
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
-        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(true)))
+        when(textTranslationService.translatePagesSingleStrategy(any(), any(TargetLanguage.class), eq(true)))
                 .thenReturn(List.of("single result"));
-        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+        when(pdfGenerationService.generatePdf(any(), any(), any())).thenReturn(new byte[]{1, 2, 3});
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
         dualService.submitPdfTranslation(file, "fr", TranslationStrategy.SINGLE);
 
-        verify(textTranslationService).translatePagesSingleStrategy(any(), anyString(), eq(true));
+        verify(textTranslationService).translatePagesSingleStrategy(any(), any(TargetLanguage.class), eq(true));
         verify(ocrService, never()).extractText(any());
     }
 
@@ -350,16 +400,16 @@ class TranslationServiceTest {
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(true)))
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(true)))
                 .thenReturn(List.of("dual result"));
-        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+        when(pdfGenerationService.generatePdf(any(), any(), any())).thenReturn(new byte[]{1, 2, 3});
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
         singleService.submitPdfTranslation(file, "fr", TranslationStrategy.DUAL);
 
         verify(ocrService).extractText(any());
-        verify(textTranslationService).translatePages(any(), anyString(), eq(true));
+        verify(textTranslationService).translatePages(any(), any(TargetLanguage.class), eq(true));
     }
 
     @Test
@@ -368,15 +418,15 @@ class TranslationServiceTest {
                 new TranslationJob("job-3", JobStatus.PENDING, java.time.Instant.now(), null, null, JobOutputFormat.PDF));
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
-        when(textTranslationService.translatePagesSingleStrategy(any(), anyString(), eq(true)))
+        when(textTranslationService.translatePagesSingleStrategy(any(), any(TargetLanguage.class), eq(true)))
                 .thenReturn(List.of("single result"));
-        when(pdfGenerationService.generatePdf(any(), any())).thenReturn(new byte[]{1, 2, 3});
+        when(pdfGenerationService.generatePdf(any(), any(), any())).thenReturn(new byte[]{1, 2, 3});
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
         singleService.submitPdfTranslation(file, "fr", null);
 
-        verify(textTranslationService).translatePagesSingleStrategy(any(), anyString(), eq(true));
+        verify(textTranslationService).translatePagesSingleStrategy(any(), any(TargetLanguage.class), eq(true));
         verify(ocrService, never()).extractText(any());
     }
 
@@ -384,7 +434,7 @@ class TranslationServiceTest {
     void constructor_invalidStrategyValue_throwsException() {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "invalid-strategy", "10MB", 20000))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("invalid-strategy");
@@ -398,8 +448,8 @@ class TranslationServiceTest {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(true))).thenReturn(List.of("translated"));
-        when(pdfGenerationService.generatePdf(any(List.class), any(List.class))).thenReturn(pdfOutput);
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(true))).thenReturn(List.of("translated"));
+        when(pdfGenerationService.generatePdf(any(List.class), any(List.class), eq(TargetLanguage.FR))).thenReturn(pdfOutput);
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
@@ -412,14 +462,14 @@ class TranslationServiceTest {
     void translateToText_usesPlainTextTranslation_notMarkdown() throws IOException {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("extracted text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(false))).thenReturn(List.of("plain text result"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("plain text result"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
         List<String> result = dualService.translateToText(file, "fr");
 
         assertThat(result).containsExactly("plain text result");
-        verify(textTranslationService).translatePages(any(), anyString(), eq(false));
+        verify(textTranslationService).translatePages(any(), any(TargetLanguage.class), eq(false));
     }
 
     @Test
@@ -428,14 +478,14 @@ class TranslationServiceTest {
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(pdfParser.extractPageLayouts(any())).thenReturn(List.of(new PageLayout(595f, 842f)));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(true))).thenReturn(List.of("markdown result"));
-        when(pdfGenerationService.generatePdf(any(List.class), any(List.class))).thenReturn(pdfOutput);
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(true))).thenReturn(List.of("markdown result"));
+        when(pdfGenerationService.generatePdf(any(List.class), any(List.class), eq(TargetLanguage.FR))).thenReturn(pdfOutput);
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
 
         dualService.translateToPdf(file, "fr");
 
-        verify(textTranslationService).translatePages(any(), anyString(), eq(true));
+        verify(textTranslationService).translatePages(any(), any(TargetLanguage.class), eq(true));
     }
 
     @Test
@@ -461,7 +511,7 @@ class TranslationServiceTest {
                 new TranslationJob("123e4567-e89b-12d3-a456-426614174001", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.MARKDOWN));
         when(pdfParser.renderPages(any())).thenReturn(List.of(new byte[]{1}, new byte[]{2}));
         when(ocrService.extractText(any())).thenReturn(List.of("text1", "text2"));
-        when(textTranslationService.translatePages(any(), anyString(), eq(true)))
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(true)))
                 .thenReturn(List.of("# Page 1", "# Page 2"));
 
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
@@ -557,7 +607,7 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
-                translationJobStore, pdfStorageService, markdownStorageService, Runnable::run,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 20000))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");

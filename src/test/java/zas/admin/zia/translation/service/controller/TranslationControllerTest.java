@@ -277,12 +277,46 @@ class TranslationControllerTest {
     }
 
     @Test
-    void translateToText_missingTargetLanguage_returns400() throws Exception {
+    void translateToText_missingTargetLanguage_isDelegatedForDefaultLanguageFallback() throws Exception {
+        when(translationService.translateToTextStream(any(), isNull(), isNull()))
+                .thenReturn(Flux.just(new TranslationStreamEvent.PageComplete(1, "Seite 1")));
+
         MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
 
-        mockMvc.perform(multipart("/api/translation/text")
+        MvcResult mvcResult = mockMvc.perform(multipart("/api/translation/text")
                         .file(file))
-                .andExpect(status().isBadRequest());
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(mvcResult))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("event:complete")));
+    }
+
+    @Test
+    void translateToPdf_missingTargetLanguage_returns202() throws Exception {
+        when(translationService.submitPdfTranslation(any(), isNull(), isNull()))
+                .thenReturn(new TranslationJobResponse("job-default-lang", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/pdf")
+                        .file(file))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-default-lang"));
+    }
+
+    @Test
+    void translateToMarkdown_missingTargetLanguage_returns202() throws Exception {
+        when(translationService.submitMarkdownTranslation(any(), isNull(), isNull()))
+                .thenReturn(new TranslationJobResponse("job-md-default-lang", JobStatus.PENDING));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.jobId").value("job-md-default-lang"));
     }
 
     @Test
@@ -451,15 +485,14 @@ class TranslationControllerTest {
     }
 
     @Test
-    void translatePlainText_missingTargetLanguage_returns400() throws Exception {
-        when(translationService.translatePlainText("Bonjour", null))
-                .thenThrow(new InvalidDocumentException("Target language is missing or empty."));
+    void translatePlainText_missingTargetLanguage_returns200WithDefaultLanguageTranslation() throws Exception {
+        when(translationService.translatePlainText("Hello", null)).thenReturn("Bonjour");
 
         mockMvc.perform(post("/api/translation/plain-text")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"text\":\"Bonjour\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value(400));
+                        .content("{\"text\":\"Hello\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.translatedText").value("Bonjour"));
     }
 
     @Test
