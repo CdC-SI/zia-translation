@@ -6,3 +6,31 @@ Content-Type: application/json
   "text": "Bonjour, comment allez-vous ?",
   "targetLanguage": "de"
 }
+
+### Submit an invoice extraction (OCR / AI, async)
+POST http://localhost:8080/zia-trad/api/v1/invoice-extractions
+Idempotency-Key: D_0035-3f2a9c1be04d7a61
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="invoice.pdf"
+Content-Type: application/pdf
+
+< ./invoice.pdf
+--boundary
+Content-Disposition: form-data; name="context"
+Content-Type: application/json
+
+{
+  "documentId": "D_0035",
+  "language": "de",
+  "officeAI": "301",
+  "knownFields": {"patient.ssn": "7568250251199"},
+  "missingFields": ["biller.gln", "treatment.date_begin", "balance.amount", "services"]
+}
+--boundary--
+
+> {% client.global.set("extractionJobId", response.body.jobId); %}
+
+### Poll the invoice extraction job
+GET http://localhost:8080/zia-trad/api/v1/invoice-extractions/{{extractionJobId}}

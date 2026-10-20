@@ -272,6 +272,99 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /invoice-extractions:
+    servers:
+      - url: /api/v1
+        description: Invoice extraction API base path
+    post:
+      summary: Submit the extraction of the data of a scanned medical invoice (async, OCR / AI)
+      operationId: submitInvoiceExtraction
+      description: >
+        Used by `ole-sumex-invoice-parser` when mandatory values of the `generalInvoiceRequest_500` XML could not be
+        found by classic extraction. Contract: `ole-sumex-invoice-parser/src/main/resources/api/ocr-extraction-openapi.yaml`.
+        Each page is analysed by the internal vision model, focusing on `context.missingFields`; the value read with
+        the highest confidence is kept for each key. Idempotent on `Idempotency-Key`: a known key returns the existing
+        job. Jobs are kept `zia.invoice-extraction.job-ttl` (default 24h) after their completion.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, context]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The scanned invoice (PDF)
+                context:
+                  $ref: '#/components/schemas/ExtractionContext'
+            encoding:
+              file:
+                contentType: application/pdf
+              context:
+                contentType: application/json
+      responses:
+        '202':
+          description: Job created (or existing job for this `Idempotency-Key`)
+          headers:
+            Location:
+              description: URL of the job, relative to the submission URL (`invoice-extractions/{jobId}`)
+              schema:
+                type: string
+            Retry-After:
+              description: Seconds to wait before polling the job
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractionJob'
+        '400':
+          description: Missing/invalid `Idempotency-Key`, `file` or `context`, or document is not a PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Document too large
+        '429':
+          description: Too many extractions in progress (retry later)
+
+  /invoice-extractions/{jobId}:
+    servers:
+      - url: /api/v1
+        description: Invoice extraction API base path
+    get:
+      summary: Status of an invoice extraction job and, once finished, its result
+      operationId: getInvoiceExtraction
+      parameters:
+        - in: path
+          name: jobId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Status of the job; `Retry-After` is set while it is `PENDING` or `RUNNING`
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractionJob'
+        '404':
+          description: Unknown or expired job
+
 components:
   schemas:
     TranslationStrategy:
@@ -376,3 +469,98 @@ components:
           type: string
           format: date-time
           description: Time at which the error occurred (ISO-8601)
+
+    ExtractionContext:
+      type: object
+      properties:
+        documentId:
+          type: string
+        language:
+          type: string
+          enum: [de, fr, it]
+        officeAI:
+          type: string
+          description: IV office number
+        knownFields:
+          type: object
+          description: Values already extracted (key = field key), used as hints
+          additionalProperties:
+            type: string
+        missingFields:
+          type: array
+          description: >
+            Field keys still missing (`<role>.<field>`, e.g. `biller.gln`, other keys such as `treatment.date_begin`,
+            and `services` for the service lines). When empty, every known key and the services are extracted.
+          items:
+            type: string
+
+    ExtractionJob:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING, SUCCEEDED, FAILED]
+        submittedAt:
+          type: string
+          format: date-time
+        result:
+          $ref: '#/components/schemas/ExtractionResponse'
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [UNREADABLE_DOCUMENT, EXTRACTION_FAILED, INTERNAL_ERROR]
+            message:
+              type: string
+
+    ExtractionResponse:
+      type: object
+      properties:
+        documentType:
+          type: string
+        fields:
+          type: object
+          additionalProperties:
+            type: object
+            required: [value]
+            properties:
+              value:
+                type: string
+              confidence:
+                type: number
+                minimum: 0
+                maximum: 1
+              page:
+                type: integer
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              tariffType:
+                type: string
+              code:
+                type: string
+              name:
+                type: string
+              quantity:
+                type: number
+              unitPrice:
+                type: number
+              amount:
+                type: number
+              vatRate:
+                type: number
+              confidence:
+                type: number
+        warnings:
+          type: array
+          items:
+            type: string
