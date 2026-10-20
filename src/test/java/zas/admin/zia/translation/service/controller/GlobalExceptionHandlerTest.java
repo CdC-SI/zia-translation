@@ -20,8 +20,8 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void maxUploadSize_onInvoiceExtraction_returns413() {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/zia-trad/api/v1/invoice-extractions");
+    void maxUploadSize_onExtraction_returns413() {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/zia-trad/api/v1/extractions");
 
         var response = handler.handleMaxUploadSize(new MaxUploadSizeExceededException(1), request);
 

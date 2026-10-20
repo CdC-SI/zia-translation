@@ -1,0 +1,93 @@
+# Extraction profile of the scanned medical invoices processed by ole-sumex-invoice-parser.
+# Keys are the field keys of the generalInvoiceRequest_500 XML (see ocr-extraction-openapi.yaml of the client).
+# Quote values that YAML could interpret (numbers with leading zeros, yes/no, on/off...).
+id: sumex-invoice
+description: Swiss medical invoice (Sumex generalInvoiceRequest 5.00) sent to the Swiss disability insurance (IV/AI)
+instructions: |
+  The document is a Swiss medical invoice (doctor, therapist, hearing aid acoustician, etc.) sent to the Swiss
+  disability insurance (IV/AI, "Invalidenversicherung", "assurance-invalidité", "assicurazione per l'invalidità").
+  It may be written in German, French or Italian.
+  Party keys are "<role>.<field>":
+  - biller: issuer of the invoice (who signs and sends it);
+  - provider: who provided the service (often the same as the biller);
+  - debitor: who must pay the invoice, usually the IV office;
+  - insurance: the insurance (IV office) the invoice is addressed to;
+  - patient: the insured person who received the service;
+  - guarantor: who guarantees the payment (often the patient or a legal representative);
+  - creditor: who receives the payment (owner of the IBAN).
+  Identifiers: a GLN has 13 digits and starts with 76; an AHV/AVS number (ssn) has 13 digits and starts with 756;
+  a ZSR/RCC number is one letter followed by 6 digits; a UID looks like CHE-123.456.789.
+  Never fill a GLN, ZSR, AHV/AVS number or IBAN that is not printed on the page.
+
+fieldGroups:
+  - prefixes: [biller, provider, debitor, insurance, patient, guarantor, creditor]
+    fields:
+      - {name: gln, type: IDENTIFIER, description: "GLN (Global Location Number), 13 digits starting with 76"}
+      - {name: gln_location, type: IDENTIFIER, description: "GLN of the location, 13 digits starting with 76"}
+      - {name: zsr, type: IDENTIFIER, description: "ZSR/RCC number (Zahlstellenregister), one letter followed by 6 digits"}
+      - {name: uid, type: STRING, description: "Swiss company identification number, e.g. CHE-123.456.789"}
+      - {name: companyname, type: STRING, description: "Company or institution name"}
+      - {name: department, type: STRING, description: "Department of the company"}
+      - {name: salutation, type: STRING, description: "Salutation as printed, e.g. Herr, Frau, Monsieur, Madame"}
+      - {name: title, type: STRING, description: "Academic or professional title, e.g. Dr. med."}
+      - {name: familyname, type: STRING, description: "Family name"}
+      - {name: givenname, type: STRING, description: "Given name"}
+      - {name: pobox, type: STRING, description: "Post office box"}
+      - {name: street, type: STRING, description: "Street name, without the house number"}
+      - {name: house_no, type: STRING, description: "House number"}
+      - {name: zip, type: STRING, description: "Postal code"}
+      - {name: city, type: STRING, description: "City"}
+      - {name: country, type: STRING, description: "Country as ISO 3166 alpha-2 code, e.g. CH"}
+      - {name: phone, type: STRING, description: "Phone number"}
+      - {name: email, type: STRING, description: "E-mail address"}
+      - {name: birthdate, type: DATE, description: "Date of birth"}
+      - {name: sex, type: ENUM, values: [male, female], description: "Sex of the person"}
+      - {name: ssn, type: IDENTIFIER, description: "Swiss AHV/AVS social security number, 13 digits starting with 756"}
+
+fields:
+  - {key: request.language, type: ENUM, values: [de, fr, it], description: "Language of the invoice"}
+  - {key: request.guid, type: STRING, description: "Unique identifier (GUID) of the request"}
+  - {key: payload.request_subtype, type: STRING, description: "Subtype of the request, e.g. copy, storno, reminder"}
+  - {key: invoice.request_id, type: STRING, description: "Invoice number"}
+  - {key: invoice.request_date, type: DATE, description: "Date of the invoice"}
+  - {key: invoice.request_timestamp, type: STRING, description: "Timestamp of the invoice"}
+  - {key: body.role, type: STRING, description: "Role of the provider, e.g. physician, physiotherapist, other"}
+  - {key: body.place, type: STRING, description: "Place of the treatment, e.g. practice, hospital"}
+  - {key: body.remark, type: STRING, description: "Free remark printed on the invoice"}
+  - {key: tiers.mode, type: STRING, description: "Billing mode: tiers garant or tiers payant"}
+  - {key: tiers.allowModification, type: STRING, description: "Whether the invoice may be modified"}
+  - {key: law.type, type: STRING, description: "Insurance law, e.g. IVG/LAI, KVG/LAMal, UVG/LAA"}
+  - {key: law.case_id, type: STRING, description: "IV case or decision number"}
+  - {key: law.case_date, type: DATE, description: "Date of the IV case or decision"}
+  - {key: law.insured_id, type: STRING, description: "Insured number at the insurance"}
+  - {key: law.card_id, type: STRING, description: "Insurance card number"}
+  - {key: treatment.date_begin, type: DATE, description: "First date of the treatment"}
+  - {key: treatment.date_end, type: DATE, description: "Last date of the treatment"}
+  - {key: treatment.canton, type: STRING, description: "Canton of the treatment, two-letter code, e.g. BE"}
+  - {key: treatment.treatment, type: STRING, description: "Kind of treatment, e.g. ambulatory, stationary"}
+  - {key: treatment.reason, type: STRING, description: "Reason of the treatment, e.g. disease, accident, birth defect"}
+  - {key: treatment.diagnosis.type, type: STRING, description: "Diagnosis coding system, e.g. ICD, by contract"}
+  - {key: treatment.diagnosis.code, type: STRING, description: "Diagnosis code"}
+  - {key: treatment.diagnosis.text, type: STRING, description: "Diagnosis text"}
+  - {key: esr.iban, type: IDENTIFIER, description: "IBAN or QR-IBAN of the payment"}
+  - {key: esr.reference_type, type: STRING, description: "Payment reference type, e.g. QRR, SCOR, NON"}
+  - {key: esr.reference_number, type: IDENTIFIER, description: "Payment reference number"}
+  - {key: esr.payment_period_days, type: NUMBER, description: "Payment period in days"}
+  - {key: balance.amount, type: AMOUNT, description: "Total amount of the invoice"}
+  - {key: balance.amount_due, type: AMOUNT, description: "Amount still due"}
+  - {key: balance.amount_prepaid, type: AMOUNT, description: "Amount already paid"}
+  - {key: balance.vat.vat_number, type: STRING, description: "VAT number of the biller, e.g. CHE-123.456.789 MWST"}
+  - {key: balance.vat.vat, type: AMOUNT, description: "Total VAT amount"}
+
+collections:
+  - key: services
+    description: Billed service lines (positions) of the invoice
+    fields:
+      - {name: date, type: DATE, description: "Date of the service"}
+      - {name: tariffType, type: STRING, description: "Tariff type code of the XSD, e.g. 007, 590, 999"}
+      - {name: code, type: STRING, description: "Tariff position code"}
+      - {name: name, type: STRING, description: "Text of the position"}
+      - {name: quantity, type: NUMBER, description: "Quantity"}
+      - {name: unitPrice, type: AMOUNT, description: "Unit price"}
+      - {name: amount, type: AMOUNT, description: "Total amount of the line"}
+      - {name: vatRate, type: NUMBER, description: "VAT rate in percent"}
