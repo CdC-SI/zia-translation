@@ -1,0 +1,101 @@
+{
+  "schema": "translation-glossary-v1",
+  "source": "test fixture",
+  "concepts": [
+    {
+      "concept_id": "test:ahv",
+      "languages": {
+        "de": {"acronym": "AHV", "full_name": "Alters- und Hinterlassenenversicherung", "definition": "Erste Säule.",
+               "detect": ["AHV"], "detect_full_names": ["Alters- und Hinterlassenenversicherung"]},
+        "fr": {"acronym": "AVS", "full_name": "assurance-vieillesse et survivants", "definition": "Premier pilier.",
+               "detect": ["AVS", "AAV"],
+               "detect_full_names": ["assurance-vieillesse et survivants", "ancienne assurance vieillesse"]},
+        "it": {"acronym": "AVS", "full_name": "assicurazione vecchiaia e superstiti", "definition": null,
+               "detect": ["AVS"], "detect_full_names": ["assicurazione vecchiaia e superstiti"]}
+      }
+    },
+    {
+      "concept_id": "test:iv",
+      "languages": {
+        "de": {"acronym": "IV", "full_name": "Invalidenversicherung", "definition": null,
+               "detect": ["IV"], "detect_full_names": ["Invalidenversicherung"]},
+        "fr": {"acronym": "AI", "full_name": "assurance-invalidité", "definition": null,
+               "detect": ["AI"], "detect_full_names": ["assurance-invalidité"]}
+      }
+    },
+    {
+      "concept_id": "test:bsv",
+      "languages": {
+        "de": {"acronym": "BSV", "full_name": "Bundesamt für Sozialversicherungen", "definition": null,
+               "detect": ["BSV"], "detect_full_names": ["Bundesamt für Sozialversicherungen"]},
+        "fr": {"acronym": null, "full_name": "Office fédéral des assurances sociales", "definition": null,
+               "detect": ["OFASX"], "detect_full_names": ["Office fédéral des assurances sociales", "OFAS-ancien"]}
+      }
+    },
+    {
+      "concept_id": "test:only-flagged-fr",
+      "languages": {
+        "de": {"acronym": "ALK", "full_name": "Alte Kasse", "definition": null,
+               "detect": ["ALK"], "detect_full_names": ["Alte Kasse"]},
+        "fr": {"acronym": null, "full_name": null, "definition": null,
+               "detect": ["VC"], "detect_full_names": ["vieille caisse"]}
+      }
+    },
+    {
+      "concept_id": "test:ak-compensation-office",
+      "languages": {
+        "de": {"acronym": "AK", "full_name": "Ausgleichskasse", "definition": null,
+               "detect": ["AK"], "detect_full_names": ["Ausgleichskasse"]},
+        "fr": {"acronym": "CC", "full_name": "caisse de compensation", "definition": null,
+               "detect": ["CC"], "detect_full_names": ["caisse de compensation"]}
+      }
+    },
+    {
+      "concept_id": "test:ak-labour-force",
+      "languages": {
+        "de": {"acronym": "AK", "full_name": "Arbeitskraft", "definition": null,
+               "detect": ["AK"], "detect_full_names": ["Arbeitskraft"]},
+        "fr": {"acronym": null, "full_name": "main-d'œuvre", "definition": null,
+               "detect": [], "detect_full_names": ["main-d'œuvre"]}
+      }
+    },
+    {
+      "concept_id": "test:epa-de",
+      "languages": {
+        "de": {"acronym": "EPA", "full_name": "Eidgenössisches Personalamt", "definition": null,
+               "detect": ["EPA"], "detect_full_names": ["Eidgenössisches Personalamt"]},
+        "fr": {"acronym": "OFPER", "full_name": "Office fédéral du personnel", "definition": null,
+               "detect": ["OFPER"], "detect_full_names": ["Office fédéral du personnel"]}
+      }
+    },
+    {
+      "concept_id": "test:epa-en",
+      "languages": {
+        "en": {"acronym": "EPA", "full_name": "Environmental Protection Agency", "definition": null,
+               "detect": ["EPA"], "detect_full_names": ["Environmental Protection Agency"]},
+        "fr": {"acronym": null, "full_name": "Agence de protection de l'environnement", "definition": null,
+               "detect": [], "detect_full_names": ["Agence de protection de l'environnement"]}
+      }
+    },
+    {
+      "concept_id": "test:famz",
+      "languages": {
+        "de": {"acronym": "FamZ", "full_name": "Familienzulagen", "definition": null,
+               "detect": ["FamZ", "FZ"], "detect_full_names": ["Familienzulagen", "Familienzulage"]},
+        "fr": {"acronym": "AFam", "full_name": "Allocations familiales", "definition": "Prestations pour les enfants.",
+               "detect": ["AFam", "AF"], "detect_full_names": ["Allocations familiales", "allocation familiale"]},
+        "it": {"acronym": "AF", "full_name": "Assegni familiari", "definition": null,
+               "detect": ["AF"], "detect_full_names": ["Assegni familiari"]}
+      }
+    },
+    {
+      "concept_id": "test:af-economy",
+      "languages": {
+        "de": {"acronym": "AF", "full_name": "Aussenwirtschaftliche Fachdienste", "definition": null,
+               "detect": ["AF"], "detect_full_names": ["Aussenwirtschaftliche Fachdienste"]},
+        "fr": {"acronym": "AF", "full_name": "Services spécialisés économie extérieure", "definition": null,
+               "detect": ["AF"], "detect_full_names": ["Services spécialisés économie extérieure"]}
+      }
+    }
+  ]
+}
