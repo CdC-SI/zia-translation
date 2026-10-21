@@ -9,14 +9,14 @@ import java.util.Map;
  *
  * @param instructions domain context added to the prompt of the model
  */
-record ExtractionProfile(
+public record ExtractionProfile(
         String id,
         String description,
         String instructions,
         Map<String, FieldDefinition> fields,
         Map<String, CollectionDefinition> collections) {
 
-    ExtractionProfile {
+    public ExtractionProfile {
         fields = Collections.unmodifiableMap(new LinkedHashMap<>(fields));
         collections = Collections.unmodifiableMap(new LinkedHashMap<>(collections));
     }

@@ -8,7 +8,7 @@ import java.time.Instant;
  * {@code ExtractionJob} of the contract: {@code result} is set when {@code SUCCEEDED}, {@code error} when {@code FAILED}.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-record ExtractionJobResponse(
+public record ExtractionJobResponse(
         String jobId,
         ExtractionStatus status,
         Instant submittedAt,

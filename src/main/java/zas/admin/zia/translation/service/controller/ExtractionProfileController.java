@@ -1,4 +1,4 @@
-package zas.admin.zia.translation.service.extraction;
+package zas.admin.zia.translation.service.controller;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -8,6 +8,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import zas.admin.zia.translation.service.config.TranslatorAccess;
+import zas.admin.zia.translation.service.extraction.CollectionDefinition;
+import zas.admin.zia.translation.service.extraction.ExtractionProfileRegistry;
+import zas.admin.zia.translation.service.extraction.FieldDefinition;
 
 import java.util.List;
 

@@ -23,8 +23,6 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 class GlobalExceptionHandler {
 
-    private static final String EXTRACTION_PATH = "/api/v1/extractions";
-
     @ExceptionHandler(InvalidDocumentException.class)
     ResponseEntity<ErrorResponse> handleInvalidDocument(InvalidDocumentException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -58,7 +56,7 @@ class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex, HttpServletRequest request) {
         // the extraction API answers 413; the multipart limit is hit before the handler is resolved
-        HttpStatus status = request.getRequestURI().contains(EXTRACTION_PATH)
+        HttpStatus status = request.getRequestURI().contains(ExtractionController.BASE_PATH)
                 ? HttpStatus.CONTENT_TOO_LARGE
                 : HttpStatus.BAD_REQUEST;
         return buildResponse(status, "File size exceeds the maximum allowed limit.");

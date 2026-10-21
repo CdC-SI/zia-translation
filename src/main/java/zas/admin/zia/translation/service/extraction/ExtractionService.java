@@ -22,7 +22,7 @@ import java.util.concurrent.RejectedExecutionException;
  * Asynchronous extraction of values from a document (PDF or image), page by page with the vision model.
  */
 @Service
-class ExtractionService {
+public class ExtractionService {
 
     private static final Logger log = LoggerFactory.getLogger(ExtractionService.class);
 
@@ -63,7 +63,7 @@ class ExtractionService {
      * @throws DocumentTooLargeException           document larger than the configured maximum
      * @throws ExtractionCapacityExceededException no capacity left to process the job
      */
-    ExtractionJobResponse submit(String idempotencyKey, MultipartFile file, ExtractionContext context)
+    public ExtractionJobResponse submit(String idempotencyKey, MultipartFile file, ExtractionContext context)
             throws IOException {
         validateIdempotencyKey(idempotencyKey);
         ExtractionRequest request = requestResolver.resolve(context);
@@ -88,7 +88,7 @@ class ExtractionService {
         return ExtractionJobResponse.of(job);
     }
 
-    Optional<ExtractionJobResponse> find(String jobId) {
+    public Optional<ExtractionJobResponse> find(String jobId) {
         return jobStore.findById(jobId).map(ExtractionJobResponse::of);
     }
 
@@ -228,14 +228,14 @@ class ExtractionService {
         return value == null ? null : value.replace("\r", "\\r").replace("\n", "\\n");
     }
 
-    static final class DocumentTooLargeException extends RuntimeException {
-        DocumentTooLargeException(String message) {
+    public static final class DocumentTooLargeException extends RuntimeException {
+        public DocumentTooLargeException(String message) {
             super(message);
         }
     }
 
-    static final class ExtractionCapacityExceededException extends RuntimeException {
-        ExtractionCapacityExceededException(String message, Throwable cause) {
+    public static final class ExtractionCapacityExceededException extends RuntimeException {
+        public ExtractionCapacityExceededException(String message, Throwable cause) {
             super(message, cause);
         }
     }

@@ -1,10 +1,6 @@
 package zas.admin.zia.translation.service.extraction;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * {@code context} part of a submission: what the client already knows and what must be extracted.
@@ -14,7 +10,7 @@ import java.util.Objects;
  * @param missingFields keys of the values (and collections) to extract
  * @param instructions  optional additional instructions for the model
  */
-record ExtractionContext(
+public record ExtractionContext(
         String profile,
         String documentId,
         String language,
@@ -22,7 +18,7 @@ record ExtractionContext(
         List<String> missingFields,
         String instructions) {
 
-    ExtractionContext {
+    public ExtractionContext {
         profile = profile == null || profile.isBlank() ? null : profile.strip();
         knownFields = knownFields == null ? Map.of() : withoutNulls(knownFields);
         missingFields = missingFields == null

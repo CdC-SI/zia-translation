@@ -7,9 +7,9 @@ import java.util.List;
  *
  * @param fields fields of one line, {@link FieldDefinition#key()} being the name of the field in the line
  */
-record CollectionDefinition(String key, String description, List<FieldDefinition> fields) {
+public record CollectionDefinition(String key, String description, List<FieldDefinition> fields) {
 
-    CollectionDefinition {
+    public CollectionDefinition {
         fields = fields == null ? List.of() : List.copyOf(fields);
     }
 }

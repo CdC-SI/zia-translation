@@ -1,4 +1,4 @@
-package zas.admin.zia.translation.service.extraction;
+package zas.admin.zia.translation.service.controller;
 
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.dto.ErrorResponse;
+import zas.admin.zia.translation.service.extraction.ExtractionService;
 
 import java.time.Instant;
 

@@ -16,14 +16,7 @@ import tools.jackson.databind.ObjectReader;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
 /**
@@ -31,7 +24,7 @@ import java.util.regex.Pattern;
  * directory {@code zia.extraction.profiles-location}. An invalid profile prevents the application from starting.
  */
 @Component
-class ExtractionProfileRegistry {
+public class ExtractionProfileRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(ExtractionProfileRegistry.class);
 
@@ -66,11 +59,11 @@ class ExtractionProfileRegistry {
         log.info("Extraction profiles loaded: {}", loaded.keySet());
     }
 
-    Optional<ExtractionProfile> find(String id) {
+    public Optional<ExtractionProfile> find(String id) {
         return Optional.ofNullable(profiles.get(id));
     }
 
-    List<ExtractionProfile> all() {
+    public List<ExtractionProfile> all() {
         return profiles.values().stream().sorted(Comparator.comparing(ExtractionProfile::id)).toList();
     }
 

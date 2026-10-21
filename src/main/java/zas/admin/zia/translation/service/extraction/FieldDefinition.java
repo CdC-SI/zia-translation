@@ -10,9 +10,9 @@ import java.util.List;
  * @param values allowed values of an {@link FieldType#ENUM} field
  */
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
-record FieldDefinition(String key, FieldType type, String description, List<String> values) {
+public record FieldDefinition(String key, FieldType type, String description, List<String> values) {
 
-    FieldDefinition {
+    public FieldDefinition {
         type = type == null ? FieldType.STRING : type;
         values = values == null ? List.of() : List.copyOf(values);
     }

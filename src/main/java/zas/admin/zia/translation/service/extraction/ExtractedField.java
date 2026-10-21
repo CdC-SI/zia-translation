@@ -11,5 +11,5 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param evidence   text read in the document by the model
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-record ExtractedField(String value, Double confidence, Integer page, String evidence) {
+public record ExtractedField(String value, Double confidence, Integer page, String evidence) {
 }

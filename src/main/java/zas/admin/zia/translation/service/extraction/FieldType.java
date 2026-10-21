@@ -3,7 +3,7 @@ package zas.admin.zia.translation.service.extraction;
 /**
  * Type of an extracted value: drives the format asked to the model, the normalization and the evidence check.
  */
-enum FieldType {
+public enum FieldType {
     STRING("text as printed"),
     DATE("date, formatted yyyy-MM-dd"),
     AMOUNT("amount with '.' as decimal separator, without currency nor thousands separator"),

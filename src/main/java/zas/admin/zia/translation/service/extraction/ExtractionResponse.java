@@ -15,7 +15,7 @@ import java.util.Map;
  * @param warnings     problems met during the extraction
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-record ExtractionResponse(
+public record ExtractionResponse(
         String profile,
         String documentType,
         Map<String, ExtractedField> fields,
