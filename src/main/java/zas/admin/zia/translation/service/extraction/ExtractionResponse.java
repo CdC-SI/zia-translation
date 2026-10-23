@@ -13,6 +13,7 @@ import java.util.Map;
  * @param fields       values found, by key; a key that was not found is absent
  * @param collections  rows found for each requested collection
  * @param warnings     problems met during the extraction
+ * @param pages        classification of the pages of the file, absent when the pages are not classified
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ExtractionResponse(
@@ -20,5 +21,16 @@ public record ExtractionResponse(
         String documentType,
         Map<String, ExtractedField> fields,
         Map<String, List<Map<String, ExtractedField>>> collections,
-        List<String> warnings) {
+        List<String> warnings,
+        List<PageClassification> pages) {
+
+    public ExtractionResponse(String profile, String documentType, Map<String, ExtractedField> fields,
+                              Map<String, List<Map<String, ExtractedField>>> collections, List<String> warnings) {
+        this(profile, documentType, fields, collections, warnings, null);
+    }
+
+    ExtractionResponse withPages(List<PageClassification> classifiedPages) {
+        return new ExtractionResponse(profile, documentType, fields, collections, warnings,
+                List.copyOf(classifiedPages));
+    }
 }

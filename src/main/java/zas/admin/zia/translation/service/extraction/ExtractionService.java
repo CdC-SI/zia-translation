@@ -12,14 +12,16 @@ import zas.admin.zia.translation.service.parser.DocumentParser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 /**
- * Asynchronous extraction of values from a document (PDF or image), page by page with the vision model.
+ * Asynchronous extraction of values from a document (PDF or image) with the vision model.
+ * <p>
+ * When the profile classifies its pages (or the client gives page hints), the pages are first classified (main
+ * document, supporting documents, other pages) and the values are extracted from the pages of the main document
+ * only, sent together. Otherwise, each page is extracted on its own and the results are merged.
  */
 @Service
 public class ExtractionService {
@@ -34,26 +36,35 @@ public class ExtractionService {
     private final ExtractionJobStore jobStore;
     private final ExtractionRequestResolver requestResolver;
     private final VisionFieldExtractor fieldExtractor;
+    private final PageClassifier pageClassifier;
     private final List<DocumentParser> parsers;
     private final Executor executor;
     private final long maxFileSizeBytes;
     private final int maxPages;
+    private final int maxImagesPerCall;
 
     ExtractionService(
             ExtractionJobStore jobStore,
             ExtractionRequestResolver requestResolver,
             VisionFieldExtractor fieldExtractor,
+            PageClassifier pageClassifier,
             List<DocumentParser> parsers,
             @Qualifier("translationTaskExecutor") Executor executor,
             @Value("${zia.translation.pdf.max-file-size}") DataSize maxFileSize,
-            @Value("${zia.extraction.max-pages:20}") int maxPages) {
+            @Value("${zia.extraction.max-pages:20}") int maxPages,
+            @Value("${zia.extraction.max-images-per-call:4}") int maxImagesPerCall) {
+        if (maxImagesPerCall < 1) {
+            throw new IllegalArgumentException("zia.extraction.max-images-per-call must be >= 1");
+        }
         this.jobStore = jobStore;
         this.requestResolver = requestResolver;
         this.fieldExtractor = fieldExtractor;
+        this.pageClassifier = pageClassifier;
         this.parsers = List.copyOf(parsers);
         this.executor = executor;
         this.maxFileSizeBytes = maxFileSize.toBytes();
         this.maxPages = maxPages;
+        this.maxImagesPerCall = maxImagesPerCall;
     }
 
     /**
@@ -126,6 +137,9 @@ public class ExtractionService {
             warnings.add("Only the first %d of %d pages were analysed".formatted(maxPages, pageCount));
             pages = pages.subList(0, maxPages);
         }
+        if (request.classifiesPages()) {
+            return extractMainDocument(pages, pageCount, request, warnings);
+        }
 
         List<PageExtraction> extractions = new ArrayList<>(pages.size());
         RuntimeException lastFailure = null;
@@ -143,6 +157,74 @@ public class ExtractionService {
             throw new AllPagesFailedException("No page of the document could be analysed.", lastFailure);
         }
         return ExtractionResultMerger.merge(request, extractions, warnings);
+    }
+
+    /**
+     * Classifies the pages (hints of the client, then the vision model for the other pages) and extracts the values
+     * from the main document only, its pages being sent together.
+     */
+    private ExtractionResponse extractMainDocument(List<byte[]> images, int pageCount, ExtractionRequest request,
+                                                   List<String> warnings) {
+        int analysed = images.size();
+        Map<Integer, PageClassification> hints = new TreeMap<>();
+        for (PageClassification hint : request.pageHints()) {
+            if (hint.page() <= analysed) {
+                hints.put(hint.page(), hint);
+            } else {
+                warnings.add("Hint of page %d ignored: the page is not analysed".formatted(hint.page()));
+            }
+        }
+
+        Map<Integer, PageClassification> known = new TreeMap<>(hints);
+        Map<Integer, ClassifiedPage> classified = new HashMap<>();
+        for (int page = 1; page <= analysed; page++) {
+            if (hints.containsKey(page)) {
+                continue;
+            }
+            int current = page;
+            List<PageClassification> context = known.values().stream().filter(p -> p.page() != current).toList();
+            try {
+                ClassifiedPage result = pageClassifier.classify(
+                        new PageImage(page, images.get(page - 1)), pageCount, request, context);
+                classified.put(page, result);
+                known.put(page, result.classification());
+            } catch (RuntimeException ex) {
+                log.warn("Classification of page {} failed", page, ex);
+                warnings.add("Page %d could not be classified".formatted(page));
+            }
+        }
+
+        PageClassificationResolver.Resolution resolution =
+                PageClassificationResolver.resolve(analysed, hints, classified);
+        warnings.addAll(resolution.warnings());
+        log.info("Pages classified: {}, extracted: {}", resolution.pages().stream()
+                .map(p -> p.page() + "=" + p.documentRole()).toList(), resolution.pagesToExtract());
+
+        List<PageExtraction> extractions = new ArrayList<>();
+        RuntimeException lastFailure = null;
+        List<Integer> toExtract = resolution.pagesToExtract();
+        for (int from = 0; from < toExtract.size(); from += maxImagesPerCall) {
+            List<Integer> batch = toExtract.subList(from, Math.min(from + maxImagesPerCall, toExtract.size()));
+            List<PageImage> batchImages = batch.stream()
+                    .map(page -> new PageImage(page, images.get(page - 1)))
+                    .toList();
+            try {
+                extractions.add(fieldExtractor.extract(batchImages, pageCount, request, true));
+            } catch (RuntimeException ex) {
+                log.warn("Extraction of pages {} failed", batch, ex);
+                warnings.add("%s could not be analysed by the extraction service".formatted(describe(batch)));
+                lastFailure = ex;
+            }
+        }
+        if (extractions.isEmpty()) {
+            throw new AllPagesFailedException("No page of the document could be analysed.", lastFailure);
+        }
+        return ExtractionResultMerger.merge(request, extractions, warnings).withPages(resolution.pages());
+    }
+
+    private static String describe(List<Integer> pages) {
+        return (pages.size() == 1 ? "Page " : "Pages ")
+                + String.join(", ", pages.stream().map(String::valueOf).toList());
     }
 
     private static void validateIdempotencyKey(String idempotencyKey) {

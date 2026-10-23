@@ -5,7 +5,9 @@ import org.springframework.stereotype.Component;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Validates an {@link ExtractionContext} and resolves the definitions of the requested values.
@@ -47,7 +49,28 @@ class ExtractionRequestResolver {
         if (context.instructions() != null && context.instructions().length() > maxInstructionsLength) {
             throw new InvalidDocumentException("'instructions' exceeds %d characters.".formatted(maxInstructionsLength));
         }
+        validatePageHints(context.pageHints());
         return context.profile() == null ? resolveAdHoc(context) : resolveWithProfile(context);
+    }
+
+    private static void validatePageHints(List<PageClassification> hints) {
+        Set<Integer> pages = new HashSet<>();
+        for (PageClassification hint : hints) {
+            if (hint.page() < 1) {
+                throw new InvalidDocumentException("'pageHints': 'page' must be at least 1.");
+            }
+            if (hint.documentRole() == null) {
+                throw new InvalidDocumentException("'pageHints': 'documentRole' is missing on page %d."
+                        .formatted(hint.page()));
+            }
+            if (hint.formId() != null && hint.formId().length() > PageClassification.MAX_FORM_ID_LENGTH) {
+                throw new InvalidDocumentException("'pageHints': 'formId' exceeds %d characters on page %d."
+                        .formatted(PageClassification.MAX_FORM_ID_LENGTH, hint.page()));
+            }
+            if (!pages.add(hint.page())) {
+                throw new InvalidDocumentException("'pageHints': page %d is given twice.".formatted(hint.page()));
+            }
+        }
     }
 
     private static ExtractionRequest resolveAdHoc(ExtractionContext context) {
@@ -60,7 +83,7 @@ class ExtractionRequestResolver {
             fields.add(FieldDefinition.adHoc(key));
         }
         return new ExtractionRequest(null, null, context.documentId(), context.language(), context.knownFields(),
-                context.instructions(), fields, List.of(), List.of());
+                context.instructions(), fields, List.of(), List.of(), context.pageHints(), null);
     }
 
     private ExtractionRequest resolveWithProfile(ExtractionContext context) {
@@ -87,7 +110,8 @@ class ExtractionRequestResolver {
                 ? List.of()
                 : List.of("Keys unknown to profile '%s' ignored: %s".formatted(profile.id(), abbreviate(ignored)));
         return new ExtractionRequest(profile.id(), profile.instructions(), context.documentId(), context.language(),
-                context.knownFields(), context.instructions(), fields, collections, warnings);
+                context.knownFields(), context.instructions(), fields, collections, warnings, context.pageHints(),
+                profile.pageClassification());
     }
 
     private static String abbreviate(List<String> keys) {

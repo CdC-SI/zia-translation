@@ -102,6 +102,30 @@ class VisionFieldExtractorHttpTest {
         assertThat(sent.toString()).contains("JSON Schema");
     }
 
+    @Test
+    void extract_mainDocument_sendsAllPagesInOneMessage_withPageInSchema() throws IOException {
+        answerContent = """
+                {"fields":{"invoice.date":{"value":"12.03.2024","evidence":"Datum: 12.03.2024","confidence":0.9,
+                "page":3}},"warnings":[]}""";
+        VisionFieldExtractor extractor = extractor("json_schema");
+        ExtractionRequest request = new ExtractionRequest(null, null, "doc-1", "de", Map.of(), null,
+                List.of(new FieldDefinition("invoice.date", FieldType.DATE, "Invoice date", null)), List.of(), List.of());
+
+        PageExtraction extraction = extractor.extract(
+                List.of(new PageImage(2, pngImage()), new PageImage(3, pngImage())), 5, request, true);
+
+        JsonNode sent = MAPPER.readTree(requestBody.get());
+        JsonNode messages = sent.get("messages");
+        JsonNode content = messages.get(messages.size() - 1).get("content");
+        List<String> types = new java.util.ArrayList<>();
+        content.forEach(part -> types.add(part.get("type").asString()));
+        assertThat(types).containsExactly("text", "image_url", "image_url");
+        assertThat(content.get(0).get("text").asString()).contains("pages 2, 3 of an uploaded file of 5 pages");
+        assertThat(sent.get("response_format").get("json_schema").get("schema").get("properties").get("fields")
+                .get("properties").get("invoice.date").get("properties").has("page")).isTrue();
+        assertThat(extraction.fields().get("invoice.date").page()).isEqualTo(3);
+    }
+
     private VisionFieldExtractor extractor(String responseFormat) {
         OpenAiChatOptions options = OpenAiChatOptions.builder()
                 .baseUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1")

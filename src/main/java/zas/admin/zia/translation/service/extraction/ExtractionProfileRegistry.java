@@ -136,7 +136,13 @@ public class ExtractionProfileRegistry {
         if (fields.isEmpty() && collections.isEmpty()) {
             throw new IllegalArgumentException("profile '%s' defines no field".formatted(document.id()));
         }
-        return new ExtractionProfile(document.id(), document.description(), document.instructions(), fields, collections);
+        PageClassificationSettings pageClassification = null;
+        if (document.pageClassification() != null) {
+            pageClassification = new PageClassificationSettings(document.pageClassification().mainDocument(),
+                    document.pageClassification().instructions());
+        }
+        return new ExtractionProfile(document.id(), document.description(), document.instructions(), fields,
+                collections, pageClassification);
     }
 
     private static void addField(Map<String, FieldDefinition> fields, Set<String> keys, FieldDefinition field) {
@@ -167,7 +173,11 @@ public class ExtractionProfileRegistry {
     }
 
     record ProfileDocument(String id, String description, String instructions, List<FieldGroupDocument> fieldGroups,
-                           List<FieldDocument> fields, List<CollectionDocument> collections) {
+                           List<FieldDocument> fields, List<CollectionDocument> collections,
+                           PageClassificationDocument pageClassification) {
+    }
+
+    record PageClassificationDocument(String mainDocument, String instructions) {
     }
 
     record FieldGroupDocument(List<String> prefixes, List<FieldDocument> fields) {

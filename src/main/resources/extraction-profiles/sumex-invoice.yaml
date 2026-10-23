@@ -7,6 +7,15 @@ instructions: |
   The document is a Swiss medical invoice (doctor, therapist, hearing aid acoustician, etc.) sent to the Swiss
   disability insurance (IV/AI, "Invalidenversicherung", "assurance-invalidité", "assicurazione per l'invalidità").
   It may be written in German, French or Italian.
+  Only the main document is shown: the invoice addressed to the IV office or to the insured person, often an IV
+  invoice form (e.g. form 300.001 "Rechnung für Hörgeräteversorgung" / "Facture pour la remise d'appareils
+  auditifs", 2 pages). Copies of invoices of the seller or of the manufacturer attached to the file are supporting
+  documents: never take a value from them.
+  On an IV form, the services are the tariff positions printed on the form (e.g. 909.04 "Reparatur Elektronik")
+  whose box is checked or whose quantity/amount is filled in, with the code and the tariff type as printed (e.g. 909),
+  once per row (e.g. once for the right and once for the left hearing aid when both are checked); the evidence
+  describes the box, e.g. "[x] 909.04 Reparatur Elektronik". The total of the invoice is the total printed on the
+  form (e.g. "Total in CHF").
   Party keys are "<role>.<field>":
   - biller: issuer of the invoice (who signs and sends it);
   - provider: who provided the service (often the same as the biller);
@@ -17,7 +26,25 @@ instructions: |
   - creditor: who receives the payment (owner of the IBAN).
   Identifiers: a GLN has 13 digits and starts with 76; an AHV/AVS number (ssn) has 13 digits and starts with 756;
   a ZSR/RCC number is one letter followed by 6 digits; a UID looks like CHE-123.456.789.
+  The AHV/AVS number is a random identifier: it contains neither the date of birth nor the sex; never derive
+  patient.birthdate or patient.sex from it.
+  A due date ("zahlbar bis", "échéance") or a guarantee date is never a service or treatment date.
   Never fill a GLN, ZSR, AHV/AVS number or IBAN that is not printed on the page.
+
+pageClassification:
+  mainDocument: the invoice addressed to the Swiss disability insurance (IV office) or to the insured person
+  instructions: |
+    The files are invoices sent to the Swiss disability insurance (IV/AI, "Invalidenversicherung",
+    "assurance-invalidité", "assicurazione per l'invalidità"), in German, French or Italian.
+    - Main document: an IV invoice form (FORM, e.g. form 300.001 "Rechnung für Hörgeräteversorgung" / "Facture
+      pour la remise d'appareils auditifs", printed "Seite 1 von 2" and "Seite 2 von 2": both pages are MAIN,
+      including the page with the instructions and the list of documents to attach), a Sumex/Tarmed invoice form
+      (FORM), or an invoice (INVOICE) addressed to the IV office or to the insured person.
+    - Supporting documents: when the file contains an IV form, every other invoice is a supporting document, e.g.
+      the copy of the invoice of the seller ("Rechnungskopie des Verkäufers", often addressed to the insured person)
+      or of the manufacturer ("Rechnungskopie des Herstellers", "Servicerechnung", addressed to the seller, e.g.
+      "Rechnungsempfänger: <company>"); also quotes, prescriptions, medical reports, cover letters and powers of
+      attorney ("Vollmacht", "procuration").
 
 fieldGroups:
   - prefixes: [biller, provider, debitor, insurance, patient, guarantor, creditor]
@@ -40,7 +67,7 @@ fieldGroups:
       - {name: country, type: STRING, description: "Country as ISO 3166 alpha-2 code, e.g. CH"}
       - {name: phone, type: STRING, description: "Phone number"}
       - {name: email, type: STRING, description: "E-mail address"}
-      - {name: birthdate, type: DATE, description: "Date of birth"}
+      - {name: birthdate, type: DATE, description: "Date of birth as printed (never derived from the AHV/AVS number)"}
       - {name: sex, type: ENUM, values: [male, female], description: "Sex of the person"}
       - {name: ssn, type: IDENTIFIER, description: "Swiss AHV/AVS social security number, 13 digits starting with 756"}
 
@@ -69,11 +96,11 @@ fields:
   - {key: treatment.diagnosis.type, type: STRING, description: "Diagnosis coding system, e.g. ICD, by contract"}
   - {key: treatment.diagnosis.code, type: STRING, description: "Diagnosis code"}
   - {key: treatment.diagnosis.text, type: STRING, description: "Diagnosis text"}
-  - {key: esr.iban, type: IDENTIFIER, description: "IBAN or QR-IBAN of the payment"}
+  - {key: esr.iban, type: IDENTIFIER, description: "IBAN or QR-IBAN of the payment to the biller (on the main document only)"}
   - {key: esr.reference_type, type: STRING, description: "Payment reference type, e.g. QRR, SCOR, NON"}
   - {key: esr.reference_number, type: IDENTIFIER, description: "Payment reference number"}
   - {key: esr.payment_period_days, type: NUMBER, description: "Payment period in days"}
-  - {key: balance.amount, type: AMOUNT, description: "Total amount of the invoice"}
+  - {key: balance.amount, type: AMOUNT, description: "Total amount of the invoice (on an IV form, the printed total, e.g. Total in CHF)"}
   - {key: balance.amount_due, type: AMOUNT, description: "Amount still due"}
   - {key: balance.amount_prepaid, type: AMOUNT, description: "Amount already paid"}
   - {key: balance.vat.vat_number, type: STRING, description: "VAT number of the biller, e.g. CHE-123.456.789 MWST"}
@@ -83,9 +110,9 @@ collections:
   - key: services
     description: Billed service lines (positions) of the invoice
     fields:
-      - {name: date, type: DATE, description: "Date of the service"}
-      - {name: tariffType, type: STRING, description: "Tariff type code of the XSD, e.g. 007, 590, 999"}
-      - {name: code, type: STRING, description: "Tariff position code"}
+      - {name: date, type: DATE, description: "Date of the service (never a due date or a guarantee date)"}
+      - {name: tariffType, type: STRING, description: "Tariff type code as printed, e.g. 909 on an IV hearing aid form; XSD code otherwise, e.g. 007, 590, 999"}
+      - {name: code, type: STRING, description: "Tariff position code as printed, e.g. 909.04"}
       - {name: name, type: STRING, description: "Text of the position"}
       - {name: quantity, type: NUMBER, description: "Quantity"}
       - {name: unitPrice, type: AMOUNT, description: "Unit price"}

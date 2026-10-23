@@ -9,6 +9,7 @@ import java.util.*;
  * @param knownFields   values already known by the client, given to the model as hints
  * @param missingFields keys of the values (and collections) to extract
  * @param instructions  optional additional instructions for the model
+ * @param pageHints     classification of pages already known by the client, to be confirmed or completed
  */
 public record ExtractionContext(
         String profile,
@@ -16,7 +17,8 @@ public record ExtractionContext(
         String language,
         Map<String, String> knownFields,
         List<String> missingFields,
-        String instructions) {
+        String instructions,
+        List<PageClassification> pageHints) {
 
     public ExtractionContext {
         profile = profile == null || profile.isBlank() ? null : profile.strip();
@@ -24,6 +26,12 @@ public record ExtractionContext(
         missingFields = missingFields == null
                 ? List.of()
                 : missingFields.stream().filter(Objects::nonNull).map(String::strip).distinct().toList();
+        pageHints = pageHints == null ? List.of() : pageHints.stream().filter(Objects::nonNull).toList();
+    }
+
+    public ExtractionContext(String profile, String documentId, String language, Map<String, String> knownFields,
+                             List<String> missingFields, String instructions) {
+        this(profile, documentId, language, knownFields, missingFields, instructions, null);
     }
 
     private static Map<String, String> withoutNulls(Map<String, String> map) {

@@ -37,6 +37,23 @@ class ExtractionProfileRegistryTest {
                 .extracting(FieldDefinition::key)
                 .containsExactly("date", "tariffType", "code", "name", "quantity", "unitPrice", "amount", "vatRate");
         assertThat(profile.instructions()).contains("biller");
+        assertThat(profile.pageClassification().mainDocument()).contains("invoice", "IV office");
+        assertThat(profile.pageClassification().instructions()).contains("300.001", "Rechnungskopie des Herstellers");
+    }
+
+    @Test
+    void pageClassification_isOptional() {
+        ExtractionProfile without = parse("id: p\nfields:\n  - {key: a}");
+        ExtractionProfile withoutInstructions = parse("id: p\nfields:\n  - {key: a}\npageClassification: {}");
+        ExtractionProfile with = parse("id: p\nfields:\n  - {key: a}\npageClassification:\n"
+                + "  mainDocument: ' the medical report '\n  instructions: ' Files. '");
+
+        assertThat(without.pageClassification()).isNull();
+        assertThat(withoutInstructions.pageClassification())
+                .isEqualTo(new PageClassificationSettings("the main document of the file", ""));
+        assertThat(with.pageClassification()).isEqualTo(new PageClassificationSettings("the medical report", "Files."));
+        assertThatThrownBy(() -> parse("id: p\nfields:\n  - {key: a}\npageClassification:\n  unknown: 1"))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

@@ -1,12 +1,6 @@
 package zas.admin.zia.translation.service.extraction;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Merges the extractions of the pages of a document:
@@ -53,7 +47,7 @@ final class ExtractionResultMerger {
 
         Set<String> allWarnings = new LinkedHashSet<>(warnings);
         for (PageExtraction page : pages) {
-            page.warnings().forEach(warning -> allWarnings.add("Page %d: %s".formatted(page.page(), warning)));
+            page.warnings().forEach(warning -> allWarnings.add("%s: %s".formatted(page.label(), warning)));
         }
         return new ExtractionResponse(request.profile(), documentType, fields,
                 collections.isEmpty() ? null : collections, List.copyOf(allWarnings));

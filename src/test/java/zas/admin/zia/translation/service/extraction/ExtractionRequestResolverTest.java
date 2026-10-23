@@ -65,6 +65,47 @@ class ExtractionRequestResolverTest {
     }
 
     @Test
+    void withProfile_classifiesPages_andKeepsPageHints() {
+        PageClassification hint = new PageClassification(1, DocumentRole.MAIN, DocumentType.FORM, "300.001", null, null);
+        ExtractionRequest request = resolver.resolve(new ExtractionContext("sumex-invoice", "D_1", "de", null,
+                List.of("biller.gln"), null, List.of(hint)));
+
+        assertThat(request.pageHints()).containsExactly(hint);
+        assertThat(request.pageClassification().mainDocument()).contains("IV office");
+        assertThat(request.pageClassification().instructions()).contains("300.001");
+        assertThat(request.classifiesPages()).isTrue();
+    }
+
+    @Test
+    void withoutProfile_classifiesPagesOnlyWithHints() {
+        ExtractionRequest withoutHints = resolver.resolve(new ExtractionContext(null, null, null, null,
+                List.of("name"), null));
+        ExtractionRequest withHints = resolver.resolve(new ExtractionContext(null, null, null, null,
+                List.of("name"), null,
+                List.of(new PageClassification(2, DocumentRole.SUPPORTING, null, null, null, null))));
+
+        assertThat(withoutHints.classifiesPages()).isFalse();
+        assertThat(withHints.classifiesPages()).isTrue();
+        assertThat(withHints.pageClassification()).isNull();
+        assertThat(withHints.pageClassificationSettings()).isEqualTo(PageClassificationSettings.DEFAULT);
+    }
+
+    @Test
+    void invalidPageHints_areRejected() {
+        assertInvalid(hints(new PageClassification(0, DocumentRole.MAIN, null, null, null, null)), "at least 1");
+        assertInvalid(hints(new PageClassification(1, null, DocumentType.FORM, null, null, null)),
+                "'documentRole' is missing on page 1");
+        assertInvalid(hints(new PageClassification(1, DocumentRole.MAIN, null, "x".repeat(36), null, null)),
+                "'formId' exceeds 35 characters");
+        assertInvalid(hints(new PageClassification(2, DocumentRole.MAIN, null, null, null, null),
+                new PageClassification(2, DocumentRole.OTHER, null, null, null, null)), "page 2 is given twice");
+    }
+
+    private static ExtractionContext hints(PageClassification... hints) {
+        return new ExtractionContext(null, null, null, null, List.of("a"), null, java.util.Arrays.asList(hints));
+    }
+
+    @Test
     void context_dropsNullsAndDuplicates() {
         ExtractionContext context = new ExtractionContext(" ", null, null, null,
                 java.util.Arrays.asList(" a ", null, "a"), null);

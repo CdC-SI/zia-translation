@@ -97,7 +97,11 @@ class VisionFieldExtractorTest {
         String prompt = VisionFieldExtractor.buildUserPrompt(2, 3, REQUEST, null);
 
         assertThat(prompt)
-                .contains("Page 2 of 3.")
+                .startsWith("The image is page 2 of an uploaded file of 3 pages.")
+                .contains("never report it as a warning")
+                .doesNotContain("Page 2 of 3")
+                .doesNotContain("main document")
+                .doesNotContain("\"page\" is the page")
                 .contains("Expected language of the document: de.")
                 .contains("About invoices.")
                 .contains("- biller.gln: GLN, 13 digits. Format: identifier")
@@ -109,6 +113,68 @@ class VisionFieldExtractorTest {
                 .doesNotContain("JSON Schema");
         assertThat(VisionFieldExtractor.buildUserPrompt(1, 1, REQUEST, "{\"type\":\"object\"}"))
                 .contains("JSON Schema:\n{\"type\":\"object\"}");
+    }
+
+    @Test
+    void buildUserPrompt_mainDocument_describesPagesSentAndPagesNotShown() {
+        String prompt = VisionFieldExtractor.buildUserPrompt(List.of(1, 2), 8, REQUEST, true, null);
+
+        assertThat(prompt)
+                .startsWith("The images are, in this order, pages 1, 2 of an uploaded file of 8 pages.")
+                .contains("They are the main document of the file, to extract: the main document of the file.")
+                .contains("The other pages of the file are supporting documents or blank pages")
+                .contains("\"Seite 1 von 2\"): never report it as a warning.")
+                .contains("For each value, \"page\" is the page of the file it is read on.")
+                .contains("printed on these pages");
+        assertThat(VisionFieldExtractor.buildUserPrompt(List.of(1), 1, REQUEST, true, null))
+                .startsWith("The image is page 1 of an uploaded file of 1 page. It is the main document")
+                .doesNotContain("other pages");
+    }
+
+    @Test
+    void buildUserPrompt_mainDocument_usesDescriptionOfTheProfile() {
+        ExtractionRequest request = new ExtractionRequest("sumex-invoice", null, null, null, Map.of(), null,
+                List.of(GLN), List.of(), List.of(), List.of(),
+                new PageClassificationSettings("the invoice addressed to the IV office", null));
+
+        assertThat(VisionFieldExtractor.buildUserPrompt(List.of(1), 3, request, true, null))
+                .contains("It is the main document of the file, to extract: the invoice addressed to the IV office.");
+        assertThat(VisionFieldExtractor.buildUserPrompt(List.of(1), 3, request, false, null))
+                .doesNotContain("main document");
+    }
+
+    @Test
+    void systemPrompt_readsOnlyCheckedPositions() {
+        assertThat(VisionFieldExtractor.SYSTEM_PROMPT)
+                .contains("only the items that are checked")
+                .contains("never return an item that is only printed")
+                .contains("Never report the page numbering of the file")
+                .doesNotContain("909")
+                .doesNotContain("tariff");
+    }
+
+    @Test
+    void parse_severalPages_attributesEachValueToItsPage() {
+        String answer = """
+                {"fields": {
+                   "biller.gln": {"value": "7601000152916", "evidence": "7601000152916", "confidence": 0.9, "page": 2},
+                   "invoice.date": {"value": "12.03.2024", "evidence": "12.03.2024", "confidence": 0.9, "page": 7}
+                 },
+                 "collections": {"services": [
+                   {"code": {"value": "909.04", "evidence": "[x] 909.04", "confidence": 0.9, "page": 1},
+                    "amount": {"value": "200.00", "evidence": "200.00", "confidence": 0.9, "page": 2}}
+                 ]}}""";
+
+        PageExtraction extraction = extractor.parse(answer, List.of(1, 2), REQUEST);
+
+        assertThat(extraction.page()).isEqualTo(1);
+        assertThat(extraction.pages()).containsExactly(1, 2);
+        assertThat(extraction.label()).isEqualTo("Pages 1, 2");
+        assertThat(extraction.fields().get("biller.gln").page()).isEqualTo(2);
+        assertThat(extraction.fields().get("invoice.date").page()).as("page not sent").isEqualTo(1);
+        Map<String, ExtractedField> row = extraction.collections().get("services").getFirst();
+        assertThat(row.get("code").page()).isEqualTo(1);
+        assertThat(row.get("amount").page()).isEqualTo(2);
     }
 
     @Test

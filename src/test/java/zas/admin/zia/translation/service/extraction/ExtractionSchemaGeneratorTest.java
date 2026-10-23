@@ -48,6 +48,18 @@ class ExtractionSchemaGeneratorTest {
         assertStrict(onlyCollections, "documentType", "collections", "warnings");
     }
 
+    @Test
+    void generate_withPage_addsPageToEachValue() {
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(SERVICES), true);
+
+        JsonNode gln = schema.get("properties").get("fields").get("properties").get("biller.gln");
+        assertStrict(gln, "value", "evidence", "confidence", "page");
+        assertThat(gln.get("properties").get("page").get("type").toString()).isEqualTo("[\"integer\",\"null\"]");
+        JsonNode amount = schema.get("properties").get("collections").get("properties").get("services")
+                .get("items").get("properties").get("amount");
+        assertStrict(amount, "value", "evidence", "confidence", "page");
+    }
+
     private static void assertStrict(JsonNode schema, String... properties) {
         assertThat(schema.get("type").asString()).isEqualTo("object");
         assertThat(schema.get("additionalProperties").asBoolean()).isFalse();

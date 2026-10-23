@@ -13,20 +13,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class ExtractionServiceTest {
 
@@ -36,9 +30,11 @@ class ExtractionServiceTest {
             Map.of(), List.of("biller.gln", "treatment.date_begin", "services", "not.a.key"), null);
 
     private static ExtractionRequestResolver resolver;
+    private static ExtractionRequestResolver classifyingResolver;
 
     private ExtractionJobStore jobStore;
     private VisionFieldExtractor extractor;
+    private PageClassifier classifier;
     private DocumentParser pdfParser;
     private DocumentParser imageParser;
     private final List<Runnable> scheduled = new ArrayList<>();
@@ -47,11 +43,17 @@ class ExtractionServiceTest {
     @BeforeEach
     void setUp() throws IOException {
         if (resolver == null) {
-            resolver = new ExtractionRequestResolver(
-                    new ExtractionProfileRegistry(JsonMapper.builder().build(), ""), 80, 2000);
+            ExtractionProfileRegistry registry = new ExtractionProfileRegistry(JsonMapper.builder().build(), "");
+            ExtractionProfile sumex = registry.find("sumex-invoice").orElseThrow();
+            ExtractionProfileRegistry withoutClassification = mock(ExtractionProfileRegistry.class);
+            when(withoutClassification.find("sumex-invoice")).thenReturn(Optional.of(new ExtractionProfile(
+                    sumex.id(), sumex.description(), sumex.instructions(), sumex.fields(), sumex.collections())));
+            resolver = new ExtractionRequestResolver(withoutClassification, 80, 2000);
+            classifyingResolver = new ExtractionRequestResolver(registry, 80, 2000);
         }
         jobStore = new ExtractionJobStore();
         extractor = mock(VisionFieldExtractor.class);
+        classifier = mock(PageClassifier.class);
         pdfParser = mock(DocumentParser.class);
         when(pdfParser.supportedMimeTypes()).thenReturn(List.of("application/pdf"));
         imageParser = mock(DocumentParser.class);
@@ -59,8 +61,13 @@ class ExtractionServiceTest {
     }
 
     private ExtractionService service(int maxPages) {
-        return new ExtractionService(jobStore, resolver, extractor, List.of(pdfParser, imageParser), executor,
-                DataSize.ofKilobytes(1), maxPages);
+        return new ExtractionService(jobStore, resolver, extractor, classifier, List.of(pdfParser, imageParser),
+                executor, DataSize.ofKilobytes(1), maxPages, 4);
+    }
+
+    private ExtractionService classifyingService(int maxPages, int maxImagesPerCall) {
+        return new ExtractionService(jobStore, classifyingResolver, extractor, classifier,
+                List.of(pdfParser, imageParser), executor, DataSize.ofKilobytes(1), maxPages, maxImagesPerCall);
     }
 
     private static MockMultipartFile file(byte[] bytes, String contentType) {
@@ -255,6 +262,146 @@ class ExtractionServiceTest {
         verify(extractor, times(2)).extract(any(), anyInt(), eq(3), any());
         assertThat(service.find(jobId).orElseThrow().result().warnings())
                 .contains("Only the first 2 of 3 pages were analysed");
+    }
+
+    // --- classified file (profile with page classification or page hints) ---
+
+    private static final ExtractionContext IV_CONTEXT = new ExtractionContext("sumex-invoice", "D_0031", "de",
+            Map.of(), List.of("balance.amount", "esr.iban", "services"), null);
+
+    private static List<byte[]> renderedPages(int count) {
+        List<byte[]> pages = new ArrayList<>();
+        for (int i = 1; i <= count; i++) {
+            pages.add(new byte[]{(byte) i});
+        }
+        return pages;
+    }
+
+    private static ClassifiedPage classified(int page, DocumentRole role, DocumentType type, String formId) {
+        return new ClassifiedPage(new PageClassification(page, role, type, formId, 0.9, null), null, null, false);
+    }
+
+    private ExtractionJobResponse run(ExtractionService service, ExtractionContext context) throws IOException {
+        String jobId = service.submit("key", pdf(PDF), context).jobId();
+        scheduled.getFirst().run();
+        return service.find(jobId).orElseThrow();
+    }
+
+    @Test
+    void process_ivDossier_extractsOnlyTheMainDocument_inOneCall() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(4));
+        when(classifier.classify(any(), anyInt(), any(), any())).thenAnswer(invocation -> {
+            int page = invocation.<PageImage>getArgument(0).page();
+            return page <= 2
+                    ? classified(page, DocumentRole.MAIN, DocumentType.FORM, "300.001")
+                    : classified(page, DocumentRole.SUPPORTING, DocumentType.INVOICE, null);
+        });
+        when(extractor.extract(any(), eq(4), any(), eq(true))).thenReturn(new PageExtraction(1, List.of(1, 2),
+                "iv_invoice_form", Map.of("balance.amount", new ExtractedField("660.00", 0.9, 2, "Total in CHF 660.00")),
+                Map.of("services", List.of(Map.of("code", new ExtractedField("909.04", 0.9, 1, "[x] 909.04")))),
+                List.of("box of 909.05 left unclear")));
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), IV_CONTEXT);
+
+        assertThat(job.status()).isEqualTo(ExtractionStatus.SUCCEEDED);
+        assertThat(job.result().fields()).containsOnlyKeys("balance.amount");
+        assertThat(job.result().collections().get("services")).hasSize(1);
+        assertThat(job.result().pages()).extracting(PageClassification::documentRole).containsExactly(
+                DocumentRole.MAIN, DocumentRole.MAIN, DocumentRole.SUPPORTING, DocumentRole.SUPPORTING);
+        assertThat(job.result().warnings()).containsExactly("Pages 1, 2: box of 909.05 left unclear");
+        verify(extractor).extract(argThat(images -> images.stream().map(PageImage::page).toList()
+                .equals(List.of(1, 2))), eq(4), any(), eq(true));
+        verify(extractor, never()).extract(any(byte[].class), anyInt(), anyInt(), any());
+        verify(classifier).classify(argThat(image -> image.page() == 2), eq(4), any(),
+                argThat(known -> known.size() == 1 && known.iterator().next().page() == 1));
+    }
+
+    @Test
+    void process_pageHints_areNotClassifiedAgain() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
+        when(classifier.classify(any(), anyInt(), any(), any()))
+                .thenReturn(classified(3, DocumentRole.OTHER, null, null));
+        when(extractor.extract(any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
+        ExtractionContext context = new ExtractionContext(null, "D_1", null, null, List.of("name"), null, List.of(
+                new PageClassification(1, DocumentRole.MAIN, DocumentType.INVOICE, null, null, null),
+                new PageClassification(2, DocumentRole.SUPPORTING, DocumentType.INVOICE, null, null, null),
+                new PageClassification(9, DocumentRole.SUPPORTING, null, null, null, null)));
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), context);
+
+        verify(classifier).classify(argThat(image -> image.page() == 3), eq(3), any(), any());
+        verify(classifier, times(1)).classify(any(), anyInt(), any(), any());
+        verify(extractor).extract(argThat(images -> images.size() == 1 && images.getFirst().page() == 1), eq(3),
+                any(), eq(true));
+        assertThat(job.result().pages()).extracting(PageClassification::page).containsExactly(1, 2, 3);
+        assertThat(job.result().warnings()).contains("Hint of page 9 ignored: the page is not analysed");
+    }
+
+    @Test
+    void process_mainDocumentLargerThanTheLimit_isSentInBatches() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
+        when(classifier.classify(any(), anyInt(), any(), any())).thenAnswer(invocation -> classified(
+                invocation.<PageImage>getArgument(0).page(), DocumentRole.MAIN, DocumentType.INVOICE, null));
+        when(extractor.extract(argThat(images -> images != null && images.size() == 2), anyInt(), any(),
+                anyBoolean())).thenThrow(new VisionFieldExtractor.PageExtractionException("bad json", null));
+        when(extractor.extract(argThat(images -> images != null && images.size() == 1), anyInt(), any(),
+                anyBoolean())).thenReturn(new PageExtraction(3, null,
+                Map.of("balance.amount", new ExtractedField("10.00", 0.9, 3, "10.00")), Map.of(), List.of()));
+
+        ExtractionJobResponse job = run(classifyingService(20, 2), IV_CONTEXT);
+
+        assertThat(job.status()).isEqualTo(ExtractionStatus.SUCCEEDED);
+        assertThat(job.result().fields().get("balance.amount").page()).isEqualTo(3);
+        assertThat(job.result().warnings()).contains("Pages 1, 2 could not be analysed by the extraction service");
+    }
+
+    @Test
+    void process_classificationFailure_pageIsTreatedAsMainDocument() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(2));
+        when(classifier.classify(argThat(image -> image != null && image.page() == 1), anyInt(), any(), any()))
+                .thenReturn(classified(1, DocumentRole.MAIN, DocumentType.FORM, null));
+        when(classifier.classify(argThat(image -> image != null && image.page() == 2), anyInt(), any(), any()))
+                .thenThrow(new PageClassifier.PageClassificationException("down", null));
+        when(extractor.extract(any(), anyInt(), any(), anyBoolean()))
+                .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), IV_CONTEXT);
+
+        verify(extractor).extract(argThat(images -> images.size() == 2), eq(2), any(), eq(true));
+        assertThat(job.result().pages()).extracting(PageClassification::page).containsExactly(1);
+        assertThat(job.result().warnings()).contains("Page 2 could not be classified");
+    }
+
+    @Test
+    void process_extractionOfMainDocumentFails_marksJobFailed() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(1));
+        when(classifier.classify(any(), anyInt(), any(), any()))
+                .thenReturn(classified(1, DocumentRole.MAIN, DocumentType.FORM, null));
+        when(extractor.extract(any(), anyInt(), any(), anyBoolean()))
+                .thenThrow(new VisionFieldExtractor.PageExtractionException("bad json", null));
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), IV_CONTEXT);
+
+        assertThat(job.status()).isEqualTo(ExtractionStatus.FAILED);
+        assertThat(job.error().code()).isEqualTo(ExtractionError.EXTRACTION_FAILED);
+    }
+
+    @Test
+    void process_profileWithoutClassification_doesNotClassify() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(1));
+        when(extractor.extract(any(byte[].class), anyInt(), anyInt(), any()))
+                .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
+
+        ExtractionJobResponse job = run(service(20), CONTEXT);
+
+        assertThat(job.result().pages()).isNull();
+        verifyNoInteractions(classifier);
+    }
+
+    @Test
+    void constructor_rejectsInvalidImageLimit() {
+        assertThatThrownBy(() -> classifyingService(20, 0)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

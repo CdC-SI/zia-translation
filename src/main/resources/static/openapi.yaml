@@ -287,6 +287,13 @@ paths:
         every key is extracted as free text. Values are normalized (dates `yyyy-MM-dd`, amounts/numbers with `.`,
         identifiers without separators) and the confidence of the model is capped when no `evidence` is given or when
         the value is not found in its evidence. The value with the highest confidence is kept for each key.
+        When the profile classifies its pages (e.g. `sumex-invoice`) or when `context.pageHints` is given, the pages
+        are first classified (`MAIN`: the one invoice of the file; `SUPPORTING`: supporting documents; `OTHER`: blank
+        or unreadable pages): pages with a hint are not classified again, the other pages are classified one by one
+        by the vision model. The values are then extracted from the pages of the main document only, sent together
+        (at most `zia.extraction.max-images-per-call` images per call), unclassified pages being treated as pages of
+        the main document; without main document, all the pages except `OTHER` ones are analysed. The classification
+        of the pages is returned in `result.pages`.
         Idempotent on `Idempotency-Key`: a known key returns the existing job. Jobs are kept `zia.extraction.job-ttl`
         (default 24h) after their completion.
       parameters:
@@ -556,6 +563,50 @@ components:
           type: string
           maxLength: 2000
           description: Additional instructions for the model
+        pageHints:
+          type: array
+          description: >
+            Classification of pages already known by the client (e.g. from the text layer), kept as given: these
+            pages are not classified again. Pages without hint are classified by the vision model. `confidence` and
+            `evidence` are not expected.
+          items:
+            $ref: '#/components/schemas/PageClassification'
+          example:
+            - {page: 1, documentRole: MAIN, documentType: FORM, formId: '300.001'}
+            - {page: 3, documentRole: SUPPORTING, documentType: INVOICE}
+
+    PageClassification:
+      type: object
+      required: [page, documentRole]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: 1-based page of the file
+        documentRole:
+          type: string
+          enum: [MAIN, SUPPORTING, OTHER]
+          description: >
+            `MAIN`: page of the invoice addressed to the insurance or to the insured person (source of the values);
+            `SUPPORTING`: supporting document (e.g. invoice of a manufacturer addressed to the provider); `OTHER`:
+            blank page, separator, unreadable page.
+        documentType:
+          type: string
+          enum: [FORM, INVOICE, CREDIT_NOTE, REMINDER, QUOTE, PRESCRIPTION, REPORT, COVER_LETTER, POWER_OF_ATTORNEY,
+                 OTHER]
+          description: Generic type of the document the page belongs to
+        formId:
+          type: string
+          maxLength: 35
+          description: Identifier printed on a form (e.g. `300.001`), when the page belongs to a form
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        evidence:
+          type: string
+          description: Text that justifies the classification (title, recipient...)
 
     ExtractionJob:
       type: object
@@ -607,6 +658,13 @@ components:
         documentType:
           type: string
           description: Free classification of the document (informative)
+        pages:
+          type: array
+          description: >
+            Classification of each page of the file, present when the pages are classified (unclassified pages are
+            absent). The fields and collection rows then come from the `MAIN` pages only.
+          items:
+            $ref: '#/components/schemas/PageClassification'
         fields:
           type: object
           description: Values found, by key; a key that was not found is absent

@@ -36,6 +36,8 @@ class ExtractionControllerTest {
              "knownFields": {"patient.ssn": "7568250251199"},
              "missingFields": ["biller.gln", "services"],
              "instructions": "The biller is the hearing aid acoustician.",
+             "pageHints": [{"page": 1, "documentRole": "MAIN", "documentType": "FORM", "formId": "300.001"},
+                           {"page": 3, "documentRole": "SUPPORTING", "documentType": "INVOICE"}],
              "unknownProperty": true}
             """;
 
@@ -52,7 +54,11 @@ class ExtractionControllerTest {
                         && "D_0035".equals(context.documentId())
                         && context.missingFields().equals(List.of("biller.gln", "services"))
                         && "7568250251199".equals(context.knownFields().get("patient.ssn"))
-                        && context.instructions().startsWith("The biller"))))
+                        && context.instructions().startsWith("The biller")
+                        && context.pageHints().equals(List.of(
+                                new PageClassification(1, DocumentRole.MAIN, DocumentType.FORM, "300.001", null, null),
+                                new PageClassification(3, DocumentRole.SUPPORTING, DocumentType.INVOICE, null, null,
+                                        null))))))
                 .thenReturn(new ExtractionJobResponse(JOB_ID, ExtractionStatus.PENDING, SUBMITTED_AT, null, null));
 
         mockMvc.perform(submitRequest().header("Idempotency-Key", "D_0035-3f2a9c1be04d7a61"))
@@ -140,7 +146,10 @@ class ExtractionControllerTest {
         ExtractionResponse result = new ExtractionResponse("sumex-invoice", "medical_invoice",
                 Map.of("biller.gln", new ExtractedField("7601000152916", 0.93, 1, "GLN 7601000152916")),
                 Map.of("services", List.of(Map.of("amount", new ExtractedField("100.00", 0.8, 2, "100.00")))),
-                List.of("Page 2: stamp over the total"));
+                List.of("Page 2: stamp over the total"),
+                List.of(new PageClassification(1, DocumentRole.MAIN, DocumentType.FORM, "300.001", 0.95,
+                        "Rechnung für Hörgeräteversorgung"),
+                        new PageClassification(2, DocumentRole.SUPPORTING, DocumentType.INVOICE, null, null, null)));
         when(extractionService.find(JOB_ID)).thenReturn(Optional.of(
                 new ExtractionJobResponse(JOB_ID, ExtractionStatus.SUCCEEDED, SUBMITTED_AT, result, null)));
 
@@ -156,6 +165,14 @@ class ExtractionControllerTest {
                 .andExpect(jsonPath("$.result.fields['biller.gln'].evidence").value("GLN 7601000152916"))
                 .andExpect(jsonPath("$.result.collections.services[0].amount.value").value("100.00"))
                 .andExpect(jsonPath("$.result.warnings[0]").value("Page 2: stamp over the total"))
+                .andExpect(jsonPath("$.result.pages[0].page").value(1))
+                .andExpect(jsonPath("$.result.pages[0].documentRole").value("MAIN"))
+                .andExpect(jsonPath("$.result.pages[0].documentType").value("FORM"))
+                .andExpect(jsonPath("$.result.pages[0].formId").value("300.001"))
+                .andExpect(jsonPath("$.result.pages[0].confidence").value(0.95))
+                .andExpect(jsonPath("$.result.pages[1].documentRole").value("SUPPORTING"))
+                .andExpect(jsonPath("$.result.pages[1].formId").doesNotExist())
+                .andExpect(jsonPath("$.result.pages[1].confidence").doesNotExist())
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
 
