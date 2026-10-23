@@ -16,6 +16,19 @@ public interface DocumentParser {
     List<byte[]> renderPages(byte[] documentBytes) throws IOException;
 
     /**
+     * Renders at most the first {@code maxPages} pages of the document as PNG images.
+     *
+     * @param documentBytes raw bytes of the source document
+     * @param maxPages      maximum number of pages to render
+     * @return the rendered pages and the page count of the document
+     * @throws IOException if the document cannot be parsed
+     */
+    default RenderedPages renderPages(byte[] documentBytes, int maxPages) throws IOException {
+        List<byte[]> pages = renderPages(documentBytes);
+        return new RenderedPages(pages.subList(0, Math.clamp(maxPages, 0, pages.size())), pages.size());
+    }
+
+    /**
      * Returns MIME types supported by this parser (e.g. "application/pdf").
      */
     List<String> supportedMimeTypes();

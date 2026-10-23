@@ -1,5 +1,6 @@
 package zas.admin.zia.translation.service.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -53,8 +54,12 @@ class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex) {
-        return buildResponse(HttpStatus.BAD_REQUEST, "File size exceeds the maximum allowed limit.");
+    ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex, HttpServletRequest request) {
+        // the extraction API answers 413; the multipart limit is hit before the handler is resolved
+        HttpStatus status = request.getRequestURI().contains(ExtractionController.BASE_PATH)
+                ? HttpStatus.CONTENT_TOO_LARGE
+                : HttpStatus.BAD_REQUEST;
+        return buildResponse(status, "File size exceeds the maximum allowed limit.");
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
