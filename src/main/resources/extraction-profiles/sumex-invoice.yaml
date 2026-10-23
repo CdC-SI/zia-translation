@@ -30,6 +30,27 @@ instructions: |
   patient.birthdate or patient.sex from it.
   A due date ("zahlbar bis", "échéance") or a guarantee date is never a service or treatment date.
   Never fill a GLN, ZSR, AHV/AVS number or IBAN that is not printed on the page.
+  Sumex/Tarmed invoice forms (printed "Release x.y", e.g. "TP-Rechnung", "Facture TP", "Fattura TP"):
+  - the identification line ("Identifikation" / "Identification" / "Identificazione": "<timestamp> · <date time> ·
+    <guid>") gives invoice.request_timestamp (the number of 10 digits) and request.guid (32 hexadecimal characters);
+    it is never the invoice number;
+  - invoice.request_id is the number printed next to the invoice date ("Rechnungsdatum/-nummer",
+    "Date/N° facture", "Data/N. fattura"), e.g. "08.10.2026 / 72587" gives 72587;
+  - coded values (role, place, reason, law, kind of treatment, diagnosis type) are given as one of the allowed
+    codes: map the printed label in German, French or Italian, e.g. "Medico" / "Arzt" / "Médecin" -> physician,
+    "Studio medico" / "Praxis" / "Cabinet" -> practice, "Prevenzione" / "Vorsorge" / "Prévention" -> prevention,
+    "IV" / "AI" / "LAI" -> IVG;
+  - a party printed with its salutation and title (e.g. "Frau Dr. med. Tatjana Walser") is a person: fill
+    salutation, title, givenname and familyname, not companyname;
+  - each service row is a printed line of the services table: return it even when a column is hard to read (with a
+    lower confidence), with rawText = the whole printed line as read (date, tariff, code, columns and amount) and
+    the Tarmed columns when printed: quantity (the quantity column, not the session number), unitMt (tax points
+    of the medical part, "TP AL" / "PT PM"), scaleFactorMt ("f AL" / "f PM"), unitFactorMt (tax point value "TPW AL" /
+    "VPT PM"), unitTt (tax points of the technical part, "TP TL" / "PT PT"), scaleFactorTt, unitFactorTt; e.g.
+    "08.10.26 007 AA.25.0030 1 8.00 2.11 1.00 0.92 1.73 1.00 0.92 1 1 0 28.26" gives quantity 8, unitMt 2.11,
+    scaleFactorMt 1, unitFactorMt 0.92, unitTt 1.73, scaleFactorTt 1, unitFactorTt 0.92 and amount 28.26.
+  The evidence of a value is the whole printed line with its label, e.g. "Schindellegistrasse 71 • 8808 Pfäffikon"
+  for a street, "Ruolo Medico" for a role.
 
 pageClassification:
   mainDocument: the invoice addressed to the Swiss disability insurance (IV office) or to the insured person
@@ -73,17 +94,17 @@ fieldGroups:
 
 fields:
   - {key: request.language, type: ENUM, values: [de, fr, it], description: "Language of the invoice"}
-  - {key: request.guid, type: STRING, description: "Unique identifier (GUID) of the request"}
+  - {key: request.guid, type: STRING, description: "Unique identifier (GUID) of the request, 32 hexadecimal characters of the identification line of a Sumex form"}
   - {key: payload.request_subtype, type: STRING, description: "Subtype of the request, e.g. copy, storno, reminder"}
-  - {key: invoice.request_id, type: STRING, description: "Invoice number"}
+  - {key: invoice.request_id, type: STRING, description: "Invoice number, printed next to the invoice date (never the identification line of a Sumex form)"}
   - {key: invoice.request_date, type: DATE, description: "Date of the invoice"}
-  - {key: invoice.request_timestamp, type: STRING, description: "Timestamp of the invoice"}
-  - {key: body.role, type: STRING, description: "Role of the provider, e.g. physician, physiotherapist, other"}
-  - {key: body.place, type: STRING, description: "Place of the treatment, e.g. practice, hospital"}
+  - {key: invoice.request_timestamp, type: STRING, description: "Timestamp of the invoice, the number of 10 digits of the identification line of a Sumex form"}
+  - {key: body.role, type: ENUM, values: [physician, physiotherapist, chiropractor, ergotherapist, nutritionist, midwife, logotherapist, hospital, rehab_clinic, psychiatric_clinic, pharmacist, dentist, labtechnician, dentaltechnician, othertechnician, psychologist, wholesaler, nursingstaff, transport, druggist, naturopathicdoctor, naturopathictherapist, other], description: "Role of the provider, mapped from the printed label (e.g. Arzt, Médecin, Medico -> physician)"}
+  - {key: body.place, type: ENUM, values: [practice, hospital, lab, association, company], description: "Place of the treatment, mapped from the printed label (e.g. Praxis, Cabinet, Studio medico -> practice)"}
   - {key: body.remark, type: STRING, description: "Free remark printed on the invoice"}
   - {key: tiers.mode, type: STRING, description: "Billing mode: tiers garant or tiers payant"}
   - {key: tiers.allowModification, type: STRING, description: "Whether the invoice may be modified"}
-  - {key: law.type, type: STRING, description: "Insurance law, e.g. IVG/LAI, KVG/LAMal, UVG/LAA"}
+  - {key: law.type, type: ENUM, values: [IVG, KVG, UVG, MVG, VVG, ORG], description: "Insurance law, mapped from the printed label (e.g. IV, AI, LAI -> IVG; KVG, LAMal -> KVG; UVG, LAA -> UVG)"}
   - {key: law.case_id, type: STRING, description: "IV case or decision number"}
   - {key: law.case_date, type: DATE, description: "Date of the IV case or decision"}
   - {key: law.insured_id, type: STRING, description: "Insured number at the insurance"}
@@ -91,9 +112,9 @@ fields:
   - {key: treatment.date_begin, type: DATE, description: "First date of the treatment"}
   - {key: treatment.date_end, type: DATE, description: "Last date of the treatment"}
   - {key: treatment.canton, type: STRING, description: "Canton of the treatment, two-letter code, e.g. BE"}
-  - {key: treatment.treatment, type: STRING, description: "Kind of treatment, e.g. ambulatory, stationary"}
-  - {key: treatment.reason, type: STRING, description: "Reason of the treatment, e.g. disease, accident, birth defect"}
-  - {key: treatment.diagnosis.type, type: STRING, description: "Diagnosis coding system, e.g. ICD, by contract"}
+  - {key: treatment.treatment, type: ENUM, values: [ambulatory, stationary], description: "Kind of treatment, mapped from the printed label (e.g. ambulant, ambulatoire, ambulatoriale -> ambulatory)"}
+  - {key: treatment.reason, type: ENUM, values: [disease, accident, maternity, prevention, birthdefect, unknown], description: "Reason of the treatment, mapped from the printed label (e.g. Krankheit, Maladie, Malattia -> disease; Vorsorge, Prévention, Prevenzione -> prevention; Geburtsgebrechen -> birthdefect)"}
+  - {key: treatment.diagnosis.type, type: ENUM, values: [ICD, cantonal, DRG, by_contract, freetext, birthdefect, ICPC], description: "Diagnosis coding system as printed (e.g. ICD-10 -> ICD, Vertrag / contrat / contratto -> by_contract, Freitext -> freetext)"}
   - {key: treatment.diagnosis.code, type: STRING, description: "Diagnosis code"}
   - {key: treatment.diagnosis.text, type: STRING, description: "Diagnosis text"}
   - {key: esr.iban, type: IDENTIFIER, description: "IBAN or QR-IBAN of the payment to the biller (on the main document only)"}
@@ -114,7 +135,14 @@ collections:
       - {name: tariffType, type: STRING, description: "Tariff type code as printed, e.g. 909 on an IV hearing aid form; XSD code otherwise, e.g. 007, 590, 999"}
       - {name: code, type: STRING, description: "Tariff position code as printed, e.g. 909.04"}
       - {name: name, type: STRING, description: "Text of the position"}
-      - {name: quantity, type: NUMBER, description: "Quantity"}
+      - {name: quantity, type: NUMBER, description: "Quantity (on a Sumex/Tarmed form the quantity column, not the session number)"}
       - {name: unitPrice, type: AMOUNT, description: "Unit price"}
       - {name: amount, type: AMOUNT, description: "Total amount of the line"}
       - {name: vatRate, type: NUMBER, description: "VAT rate in percent"}
+      - {name: unitMt, type: NUMBER, description: "Tarmed: tax points of the medical part (TP AL / PT PM)"}
+      - {name: scaleFactorMt, type: NUMBER, description: "Tarmed: scale factor of the medical part (f AL / f PM)"}
+      - {name: unitFactorMt, type: NUMBER, description: "Tarmed: tax point value of the medical part (TPW AL / VPT PM)"}
+      - {name: unitTt, type: NUMBER, description: "Tarmed: tax points of the technical part (TP TL / PT PT)"}
+      - {name: scaleFactorTt, type: NUMBER, description: "Tarmed: scale factor of the technical part (f TL / f PT)"}
+      - {name: unitFactorTt, type: NUMBER, description: "Tarmed: tax point value of the technical part (TPW TL / VPT PT)"}
+      - {name: rawText, type: STRING, description: "Whole printed line of the service as read, with all its columns"}

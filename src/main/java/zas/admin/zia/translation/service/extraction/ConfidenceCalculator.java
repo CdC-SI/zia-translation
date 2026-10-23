@@ -4,6 +4,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.text.Normalizer;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,6 +24,9 @@ class ConfidenceCalculator {
     private static final Pattern NON_DIGIT = Pattern.compile("\\D");
     private static final Pattern DATE_TOKEN =
             Pattern.compile("\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}\\s*[./-]\\s*\\d{1,2}\\s*[./-]\\s*\\d{4}");
+    /** Date printed with a 2-digit year, e.g. {@code 08.10.26} on the service lines of a Tarmed form. */
+    private static final Pattern SHORT_DATE_TOKEN =
+            Pattern.compile("(?<![\\d.])(\\d{1,2})\\s*[./-]\\s*(\\d{1,2})\\s*[./-]\\s*(\\d{2})(?!\\d)");
 
     private final double noEvidenceCap;
     private final double unmatchedEvidenceCap;
@@ -63,7 +68,10 @@ class ConfidenceCalculator {
         };
     }
 
-    /** A numeric date of the evidence equals the value, or the evidence has a textual date of the same year. */
+    /**
+     * A numeric date of the evidence equals the value (a 2-digit year matches the last 2 digits of the year), or the
+     * evidence has a textual date of the same year.
+     */
     private static boolean matchesDate(String value, String evidence) {
         Matcher matcher = DATE_TOKEN.matcher(evidence);
         boolean numericDate = false;
@@ -73,7 +81,25 @@ class ConfidenceCalculator {
                 return true;
             }
         }
+        Matcher shortDate = SHORT_DATE_TOKEN.matcher(evidence);
+        while (shortDate.find()) {
+            numericDate = true;
+            if (matchesShortDate(value, shortDate)) {
+                return true;
+            }
+        }
         return !numericDate && value.length() >= 4 && evidence.contains(value.substring(0, 4));
+    }
+
+    private static boolean matchesShortDate(String value, Matcher shortDate) {
+        try {
+            LocalDate date = LocalDate.parse(value);
+            return date.getDayOfMonth() == Integer.parseInt(shortDate.group(1))
+                    && date.getMonthValue() == Integer.parseInt(shortDate.group(2))
+                    && date.getYear() % 100 == Integer.parseInt(shortDate.group(3));
+        } catch (DateTimeParseException e) {
+            return false;
+        }
     }
 
     private static String fold(String text) {

@@ -35,7 +35,14 @@ class ExtractionProfileRegistryTest {
         assertThat(profile.collections()).containsOnlyKeys("services");
         assertThat(profile.collections().get("services").fields())
                 .extracting(FieldDefinition::key)
-                .containsExactly("date", "tariffType", "code", "name", "quantity", "unitPrice", "amount", "vatRate");
+                .containsExactly("date", "tariffType", "code", "name", "quantity", "unitPrice", "amount", "vatRate",
+                        "unitMt", "scaleFactorMt", "unitFactorMt", "unitTt", "scaleFactorTt", "unitFactorTt", "rawText");
+        assertThat(profile.fields().get("body.role").values()).contains("physician", "other");
+        assertThat(profile.fields().get("body.place").values()).containsExactly("practice", "hospital", "lab",
+                "association", "company");
+        assertThat(profile.fields().get("treatment.reason").values()).contains("prevention", "birthdefect");
+        assertThat(profile.fields().get("law.type").values()).contains("IVG");
+        assertThat(profile.instructions()).contains("identification line", "rawText");
         assertThat(profile.instructions()).contains("biller");
         assertThat(profile.pageClassification().mainDocument()).contains("invoice", "IV office");
         assertThat(profile.pageClassification().instructions()).contains("300.001", "Rechnungskopie des Herstellers");

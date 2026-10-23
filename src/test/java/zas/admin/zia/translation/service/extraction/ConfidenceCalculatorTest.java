@@ -32,6 +32,11 @@ class ConfidenceCalculatorTest {
             "DATE       | 2024-03-12    | Datum: 13.03.2024          | 0.9  | 0.5",
             "DATE       | 2024-03-12    | Bern, 12. März 2024        | 0.9  | 0.9",
             "DATE       | 2024-03-12    | Bern, 12. März 2023        | 0.9  | 0.5",
+            // date with a 2-digit year, e.g. the service lines of a Tarmed form
+            "DATE       | 2026-10-08    | 08.10.26 007 AA.25.0030 1  | 0.9  | 0.9",
+            "DATE       | 2026-10-08    | 09.10.26 007 AA.25.0030 1  | 0.9  | 0.5",
+            "DATE       | 2026-10-08    | 08.10.2026 / 72587         | 0.9  | 0.9",
+            "DATE       | 2024-03-12    | Datum: 12.03.2025          | 0.9  | 0.5",
             "ENUM       | male          | Herr                       | 0.9  | 0.9",
     })
     void compute(FieldType type, String value, String evidence, Double modelConfidence, double expected) {
