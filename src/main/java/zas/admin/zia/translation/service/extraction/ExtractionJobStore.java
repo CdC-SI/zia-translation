@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 
 /**
@@ -33,12 +34,32 @@ class ExtractionJobStore {
      * Returns the job of the given key, creating a {@code PENDING} one when the key is unknown.
      */
     Submission submit(String idempotencyKey) {
+        return submit(idempotencyKey, job -> {
+        });
+    }
+
+    /**
+     * Returns the job of the given key, creating a {@code PENDING} one when the key is unknown and admitting it with
+     * {@code admission} (e.g. scheduling its processing) before the key is published. Concurrent submissions of the
+     * same key wait for the admission: they get the admitted job or, when the admission fails, try again to create
+     * and admit their own job.
+     *
+     * @throws RuntimeException the exception of the admission; the job is then forgotten
+     */
+    Submission submit(String idempotencyKey, Consumer<ExtractionJob> admission) {
         while (true) {
             boolean[] created = {false};
             String jobId = jobIdsByKey.computeIfAbsent(idempotencyKey, key -> {
                 String newJobId = UUID.randomUUID().toString();
-                jobs.put(newJobId, new ExtractionJob(newJobId, key, ExtractionStatus.PENDING,
-                        clock.instant(), null, null, null));
+                ExtractionJob newJob = new ExtractionJob(newJobId, key, ExtractionStatus.PENDING,
+                        clock.instant(), null, null, null);
+                jobs.put(newJobId, newJob);
+                try {
+                    admission.accept(newJob);
+                } catch (RuntimeException ex) {
+                    jobs.remove(newJobId);
+                    throw ex;
+                }
                 created[0] = true;
                 return newJobId;
             });

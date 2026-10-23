@@ -9,6 +9,7 @@ import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.parser.DocumentParser;
+import zas.admin.zia.translation.service.parser.RenderedPages;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -81,17 +82,17 @@ public class ExtractionService {
         byte[] document = readDocument(file);
         DocumentParser parser = selectParser(document, file.getContentType());
 
-        ExtractionJobStore.Submission submission = jobStore.submit(idempotencyKey);
+        ExtractionJobStore.Submission submission;
+        try {
+            submission = jobStore.submit(idempotencyKey,
+                    created -> executor.execute(() -> process(created.jobId(), document, parser, request)));
+        } catch (RejectedExecutionException ex) {
+            throw new ExtractionCapacityExceededException("Too many extractions in progress, retry later.", ex);
+        }
         ExtractionJob job = submission.job();
         if (!submission.created()) {
             log.info("Extraction already submitted for key '{}': job {}", sanitize(idempotencyKey), job.jobId());
             return ExtractionJobResponse.of(job);
-        }
-        try {
-            executor.execute(() -> process(job.jobId(), document, parser, request));
-        } catch (RejectedExecutionException ex) {
-            jobStore.delete(job.jobId());
-            throw new ExtractionCapacityExceededException("Too many extractions in progress, retry later.", ex);
         }
         log.info("Extraction job {} submitted for document '{}' (profile {}, {} fields, {} collections)",
                 job.jobId(), sanitize(request.documentId()), request.profile(),
@@ -121,21 +122,21 @@ public class ExtractionService {
     }
 
     private ExtractionResponse extract(byte[] document, DocumentParser parser, ExtractionRequest request) {
-        List<byte[]> pages;
+        RenderedPages rendered;
         try {
-            pages = parser.renderPages(document);
+            rendered = parser.renderPages(document, maxPages);
         } catch (IOException | RuntimeException ex) {
             throw new UnreadableDocumentException("The document cannot be read.", ex);
         }
+        List<byte[]> pages = rendered.pages();
+        int pageCount = rendered.pageCount();
         if (pages.isEmpty()) {
             throw new UnreadableDocumentException("The document has no page.", null);
         }
 
         List<String> warnings = new ArrayList<>(request.warnings());
-        int pageCount = pages.size();
-        if (pageCount > maxPages) {
-            warnings.add("Only the first %d of %d pages were analysed".formatted(maxPages, pageCount));
-            pages = pages.subList(0, maxPages);
+        if (pageCount > pages.size()) {
+            warnings.add("Only the first %d of %d pages were analysed".formatted(pages.size(), pageCount));
         }
         if (request.classifiesPages()) {
             return extractMainDocument(pages, pageCount, request, warnings);

@@ -7,15 +7,21 @@ import org.springframework.util.unit.DataSize;
 import tools.jackson.databind.json.JsonMapper;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.parser.DocumentParser;
+import zas.admin.zia.translation.service.parser.RenderedPages;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,8 +62,10 @@ class ExtractionServiceTest {
         classifier = mock(PageClassifier.class);
         pdfParser = mock(DocumentParser.class);
         when(pdfParser.supportedMimeTypes()).thenReturn(List.of("application/pdf"));
+        when(pdfParser.renderPages(any(), anyInt())).thenCallRealMethod();
         imageParser = mock(DocumentParser.class);
         when(imageParser.supportedMimeTypes()).thenReturn(List.of("image/png", "image/jpeg"));
+        when(imageParser.renderPages(any(), anyInt())).thenCallRealMethod();
     }
 
     private ExtractionService service(int maxPages) {
@@ -141,6 +149,60 @@ class ExtractionServiceTest {
 
         executor = scheduled::add;
         assertThat(service(20).submit("key", pdf(PDF), CONTEXT).status()).isEqualTo(ExtractionStatus.PENDING);
+        assertThat(scheduled).hasSize(1);
+    }
+
+    @Test
+    void submit_duplicateDuringRejectedAdmission_waitsAndGetsAnAdmittedJob() throws Exception {
+        CountDownLatch admitting = new CountDownLatch(1);
+        CountDownLatch reject = new CountDownLatch(1);
+        AtomicBoolean first = new AtomicBoolean(true);
+        executor = task -> {
+            if (first.getAndSet(false)) {
+                admitting.countDown();
+                try {
+                    reject.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                throw new RejectedExecutionException("full");
+            }
+            scheduled.add(task);
+        };
+        ExtractionService service = service(20);
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+        AtomicReference<ExtractionJobResponse> duplicate = new AtomicReference<>();
+        Thread submissionA = new Thread(() -> {
+            try {
+                service.submit("key", pdf(PDF), CONTEXT);
+            } catch (Throwable t) {
+                firstFailure.set(t);
+            }
+        });
+        Thread submissionB = new Thread(() -> {
+            try {
+                duplicate.set(service.submit("key", pdf(PDF), CONTEXT));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+
+        submissionA.start();
+        assertThat(admitting.await(5, TimeUnit.SECONDS)).isTrue();
+        submissionB.start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (submissionB.getState() != Thread.State.BLOCKED && submissionB.getState() != Thread.State.TERMINATED
+                && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertThat(duplicate.get()).as("the duplicate waits for the admission of the first job").isNull();
+        reject.countDown();
+        submissionA.join(5000);
+        submissionB.join(5000);
+
+        assertThat(firstFailure.get()).isInstanceOf(ExtractionService.ExtractionCapacityExceededException.class);
+        assertThat(duplicate.get()).isNotNull();
+        assertThat(service.find(duplicate.get().jobId())).isPresent();
         assertThat(scheduled).hasSize(1);
     }
 
@@ -262,6 +324,22 @@ class ExtractionServiceTest {
         verify(extractor, times(2)).extract(any(), anyInt(), eq(3), any());
         assertThat(service.find(jobId).orElseThrow().result().warnings())
                 .contains("Only the first 2 of 3 pages were analysed");
+    }
+
+    @Test
+    void process_rendersOnlyTheAnalysedPages() throws IOException {
+        doReturn(new RenderedPages(renderedPages(2), 50)).when(pdfParser).renderPages(PDF, 2);
+        when(extractor.extract(any(), anyInt(), anyInt(), any()))
+                .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
+        ExtractionService service = service(2);
+        String jobId = service.submit("key", pdf(PDF), CONTEXT).jobId();
+
+        scheduled.getFirst().run();
+
+        verify(pdfParser, never()).renderPages(any());
+        verify(extractor, times(2)).extract(any(), anyInt(), eq(50), any());
+        assertThat(service.find(jobId).orElseThrow().result().warnings())
+                .contains("Only the first 2 of 50 pages were analysed");
     }
 
     // --- classified file (profile with page classification or page hints) ---

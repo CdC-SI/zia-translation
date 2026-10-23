@@ -9,8 +9,9 @@ import java.util.Objects;
  * Consolidates the classification of the pages of a file and selects the pages to extract.
  * <ul>
  *     <li>the hints of the client are kept as given;</li>
- *     <li>a page classified by the model that continues a page of the main document (same form, printed numbering
- *     that follows, or continuation according to the model) is a page of the main document;</li>
+ *     <li>a page classified by the model that continues a page of the main document (same form whose printed
+ *     numbering does not start again at 1, printed numbering that follows, or continuation according to the model)
+ *     is a page of the main document;</li>
  *     <li>the pages to extract are the pages of the main document and the unclassified pages (treated like pages of
  *     the main document); without main document, all the pages except the {@link DocumentRole#OTHER} ones.</li>
  * </ul>
@@ -88,7 +89,9 @@ final class PageClassificationResolver {
             return false;
         }
         String formId = current.classification().formId();
-        boolean sameForm = formId != null && formId.equals(previous.formId());
+        // a form ID identifies a template: a page whose printed numbering starts again is another document
+        boolean numberingRestarts = current.printedPageNumber() != null && current.printedPageNumber() == 1;
+        boolean sameForm = formId != null && formId.equals(previous.formId()) && !numberingRestarts;
         boolean numberingContinues = previousModel != null
                 && previousModel.printedPageNumber() != null && current.printedPageNumber() != null
                 && current.printedPageNumber() == previousModel.printedPageNumber() + 1

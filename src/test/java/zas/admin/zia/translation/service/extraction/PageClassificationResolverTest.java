@@ -63,6 +63,22 @@ class PageClassificationResolverTest {
     }
 
     @Test
+    void sameFormWhosePrintedNumberingStartsAgain_isAnotherDocument() {
+        Map<Integer, ClassifiedPage> classified = new HashMap<>();
+        classified.put(1, model(1, MAIN, DocumentType.FORM, "300.001", 1, 2, false));
+        classified.put(2, model(2, MAIN, DocumentType.FORM, "300.001", 2, 2, true));
+        classified.put(3, model(3, SUPPORTING, DocumentType.FORM, "300.001", 1, 2, false));
+        classified.put(4, model(4, SUPPORTING, DocumentType.FORM, "300.001", 2, 2, true));
+
+        PageClassificationResolver.Resolution resolution = PageClassificationResolver.resolve(4, Map.of(), classified);
+
+        assertThat(resolution.pagesToExtract()).containsExactly(1, 2);
+        assertThat(resolution.pages()).extracting(PageClassification::documentRole)
+                .containsExactly(MAIN, MAIN, SUPPORTING, SUPPORTING);
+        assertThat(resolution.warnings()).isEmpty();
+    }
+
+    @Test
     void hints_areKeptAsGiven_andUnclassifiedPagesAreExtracted() {
         Map<Integer, PageClassification> hints = Map.of(
                 1, hint(1, MAIN, null),
