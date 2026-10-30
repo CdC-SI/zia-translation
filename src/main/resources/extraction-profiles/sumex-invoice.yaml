@@ -1,0 +1,148 @@
+# Extraction profile of the scanned medical invoices processed by ole-sumex-invoice-parser.
+# Keys are the field keys of the generalInvoiceRequest_500 XML (see ocr-extraction-openapi.yaml of the client).
+# Quote values that YAML could interpret (numbers with leading zeros, yes/no, on/off...).
+id: sumex-invoice
+description: Swiss medical invoice (Sumex generalInvoiceRequest 5.00) sent to the Swiss disability insurance (IV/AI)
+instructions: |
+  The document is a Swiss medical invoice (doctor, therapist, hearing aid acoustician, etc.) sent to the Swiss
+  disability insurance (IV/AI, "Invalidenversicherung", "assurance-invalidité", "assicurazione per l'invalidità").
+  It may be written in German, French or Italian.
+  Only the main document is shown: the invoice addressed to the IV office or to the insured person, often an IV
+  invoice form (e.g. form 300.001 "Rechnung für Hörgeräteversorgung" / "Facture pour la remise d'appareils
+  auditifs", 2 pages). Copies of invoices of the seller or of the manufacturer attached to the file are supporting
+  documents: never take a value from them.
+  On an IV form, the services are the tariff positions printed on the form (e.g. 909.04 "Reparatur Elektronik")
+  whose box is checked or whose quantity/amount is filled in, with the code and the tariff type as printed (e.g. 909),
+  once per row (e.g. once for the right and once for the left hearing aid when both are checked); the evidence
+  describes the box, e.g. "[x] 909.04 Reparatur Elektronik". The total of the invoice is the total printed on the
+  form (e.g. "Total in CHF").
+  Party keys are "<role>.<field>":
+  - biller: issuer of the invoice (who signs and sends it);
+  - provider: who provided the service (often the same as the biller);
+  - debitor: who must pay the invoice, usually the IV office;
+  - insurance: the insurance (IV office) the invoice is addressed to;
+  - patient: the insured person who received the service;
+  - guarantor: who guarantees the payment (often the patient or a legal representative);
+  - creditor: who receives the payment (owner of the IBAN).
+  Identifiers: a GLN has 13 digits and starts with 76; an AHV/AVS number (ssn) has 13 digits and starts with 756;
+  a ZSR/RCC number is one letter followed by 6 digits; a UID looks like CHE-123.456.789.
+  The AHV/AVS number is a random identifier: it contains neither the date of birth nor the sex; never derive
+  patient.birthdate or patient.sex from it.
+  A due date ("zahlbar bis", "échéance") or a guarantee date is never a service or treatment date.
+  Never fill a GLN, ZSR, AHV/AVS number or IBAN that is not printed on the page.
+  Sumex/Tarmed invoice forms (printed "Release x.y", e.g. "TP-Rechnung", "Facture TP", "Fattura TP"):
+  - the identification line ("Identifikation" / "Identification" / "Identificazione": "<timestamp> · <date time> ·
+    <guid>") gives invoice.request_timestamp (the number of 10 digits) and request.guid (32 hexadecimal characters);
+    it is never the invoice number;
+  - invoice.request_id is the number printed next to the invoice date ("Rechnungsdatum/-nummer",
+    "Date/N° facture", "Data/N. fattura"), e.g. "08.10.2026 / 72587" gives 72587;
+  - coded values (role, place, reason, law, kind of treatment, diagnosis type) are given as one of the allowed
+    codes: map the printed label in German, French or Italian, e.g. "Medico" / "Arzt" / "Médecin" -> physician,
+    "Studio medico" / "Praxis" / "Cabinet" -> practice, "Prevenzione" / "Vorsorge" / "Prévention" -> prevention,
+    "IV" / "AI" / "LAI" -> IVG;
+  - a party printed with its salutation and title (e.g. "Frau Dr. med. Tatjana Walser") is a person: fill
+    salutation, title, givenname and familyname, not companyname;
+  - each service row is a printed line of the services table: return it even when a column is hard to read (with a
+    lower confidence), with rawText = the whole printed line as read (date, tariff, code, columns and amount) and
+    the Tarmed columns when printed: quantity (the quantity column, not the session number), unitMt (tax points
+    of the medical part, "TP AL" / "PT PM"), scaleFactorMt ("f AL" / "f PM"), unitFactorMt (tax point value "TPW AL" /
+    "VPT PM"), unitTt (tax points of the technical part, "TP TL" / "PT PT"), scaleFactorTt, unitFactorTt; e.g.
+    "08.10.26 007 AA.25.0030 1 8.00 2.11 1.00 0.92 1.73 1.00 0.92 1 1 0 28.26" gives quantity 8, unitMt 2.11,
+    scaleFactorMt 1, unitFactorMt 0.92, unitTt 1.73, scaleFactorTt 1, unitFactorTt 0.92 and amount 28.26.
+  The evidence of a value is the whole printed line with its label, e.g. "Schindellegistrasse 71 • 8808 Pfäffikon"
+  for a street, "Ruolo Medico" for a role.
+
+pageClassification:
+  mainDocument: the invoice addressed to the Swiss disability insurance (IV office) or to the insured person
+  instructions: |
+    The files are invoices sent to the Swiss disability insurance (IV/AI, "Invalidenversicherung",
+    "assurance-invalidité", "assicurazione per l'invalidità"), in German, French or Italian.
+    - Main document: an IV invoice form (FORM, e.g. form 300.001 "Rechnung für Hörgeräteversorgung" / "Facture
+      pour la remise d'appareils auditifs", printed "Seite 1 von 2" and "Seite 2 von 2": both pages are MAIN,
+      including the page with the instructions and the list of documents to attach), a Sumex/Tarmed invoice form
+      (FORM), or an invoice (INVOICE) addressed to the IV office or to the insured person.
+    - Supporting documents: when the file contains an IV form, every other invoice is a supporting document, e.g.
+      the copy of the invoice of the seller ("Rechnungskopie des Verkäufers", often addressed to the insured person)
+      or of the manufacturer ("Rechnungskopie des Herstellers", "Servicerechnung", addressed to the seller, e.g.
+      "Rechnungsempfänger: <company>"); also quotes, prescriptions, medical reports, cover letters and powers of
+      attorney ("Vollmacht", "procuration").
+
+fieldGroups:
+  - prefixes: [biller, provider, debitor, insurance, patient, guarantor, creditor]
+    fields:
+      - {name: gln, type: IDENTIFIER, description: "GLN (Global Location Number), 13 digits starting with 76"}
+      - {name: gln_location, type: IDENTIFIER, description: "GLN of the location, 13 digits starting with 76"}
+      - {name: zsr, type: IDENTIFIER, description: "ZSR/RCC number (Zahlstellenregister), one letter followed by 6 digits"}
+      - {name: uid, type: STRING, description: "Swiss company identification number, e.g. CHE-123.456.789"}
+      - {name: companyname, type: STRING, description: "Company or institution name"}
+      - {name: department, type: STRING, description: "Department of the company"}
+      - {name: salutation, type: STRING, description: "Salutation as printed, e.g. Herr, Frau, Monsieur, Madame"}
+      - {name: title, type: STRING, description: "Academic or professional title, e.g. Dr. med."}
+      - {name: familyname, type: STRING, description: "Family name"}
+      - {name: givenname, type: STRING, description: "Given name"}
+      - {name: pobox, type: STRING, description: "Post office box"}
+      - {name: street, type: STRING, description: "Street name, without the house number"}
+      - {name: house_no, type: STRING, description: "House number"}
+      - {name: zip, type: STRING, description: "Postal code"}
+      - {name: city, type: STRING, description: "City"}
+      - {name: country, type: STRING, description: "Country as ISO 3166 alpha-2 code, e.g. CH"}
+      - {name: phone, type: STRING, description: "Phone number"}
+      - {name: email, type: STRING, description: "E-mail address"}
+      - {name: birthdate, type: DATE, description: "Date of birth as printed (never derived from the AHV/AVS number)"}
+      - {name: sex, type: ENUM, values: [male, female], description: "Sex of the person"}
+      - {name: ssn, type: IDENTIFIER, description: "Swiss AHV/AVS social security number, 13 digits starting with 756"}
+
+fields:
+  - {key: request.language, type: ENUM, values: [de, fr, it], description: "Language of the invoice"}
+  - {key: request.guid, type: STRING, description: "Unique identifier (GUID) of the request, 32 hexadecimal characters of the identification line of a Sumex form"}
+  - {key: payload.request_subtype, type: STRING, description: "Subtype of the request, e.g. copy, storno, reminder"}
+  - {key: invoice.request_id, type: STRING, description: "Invoice number, printed next to the invoice date (never the identification line of a Sumex form)"}
+  - {key: invoice.request_date, type: DATE, description: "Date of the invoice"}
+  - {key: invoice.request_timestamp, type: STRING, description: "Timestamp of the invoice, the number of 10 digits of the identification line of a Sumex form"}
+  - {key: body.role, type: ENUM, values: [physician, physiotherapist, chiropractor, ergotherapist, nutritionist, midwife, logotherapist, hospital, rehab_clinic, psychiatric_clinic, pharmacist, dentist, labtechnician, dentaltechnician, othertechnician, psychologist, wholesaler, nursingstaff, transport, druggist, naturopathicdoctor, naturopathictherapist, other], description: "Role of the provider, mapped from the printed label (e.g. Arzt, Médecin, Medico -> physician)"}
+  - {key: body.place, type: ENUM, values: [practice, hospital, lab, association, company], description: "Place of the treatment, mapped from the printed label (e.g. Praxis, Cabinet, Studio medico -> practice)"}
+  - {key: body.remark, type: STRING, description: "Free remark printed on the invoice"}
+  - {key: tiers.mode, type: STRING, description: "Billing mode: tiers garant or tiers payant"}
+  - {key: tiers.allowModification, type: STRING, description: "Whether the invoice may be modified"}
+  - {key: law.type, type: ENUM, values: [IVG, KVG, UVG, MVG, VVG, ORG], description: "Insurance law, mapped from the printed label (e.g. IV, AI, LAI -> IVG; KVG, LAMal -> KVG; UVG, LAA -> UVG)"}
+  - {key: law.case_id, type: STRING, description: "IV case or decision number"}
+  - {key: law.case_date, type: DATE, description: "Date of the IV case or decision"}
+  - {key: law.insured_id, type: STRING, description: "Insured number at the insurance"}
+  - {key: law.card_id, type: STRING, description: "Insurance card number"}
+  - {key: treatment.date_begin, type: DATE, description: "First date of the treatment"}
+  - {key: treatment.date_end, type: DATE, description: "Last date of the treatment"}
+  - {key: treatment.canton, type: STRING, description: "Canton of the treatment, two-letter code, e.g. BE"}
+  - {key: treatment.treatment, type: ENUM, values: [ambulatory, stationary], description: "Kind of treatment, mapped from the printed label (e.g. ambulant, ambulatoire, ambulatoriale -> ambulatory)"}
+  - {key: treatment.reason, type: ENUM, values: [disease, accident, maternity, prevention, birthdefect, unknown], description: "Reason of the treatment, mapped from the printed label (e.g. Krankheit, Maladie, Malattia -> disease; Vorsorge, Prévention, Prevenzione -> prevention; Geburtsgebrechen -> birthdefect)"}
+  - {key: treatment.diagnosis.type, type: ENUM, values: [ICD, cantonal, DRG, by_contract, freetext, birthdefect, ICPC], description: "Diagnosis coding system as printed (e.g. ICD-10 -> ICD, Vertrag / contrat / contratto -> by_contract, Freitext -> freetext)"}
+  - {key: treatment.diagnosis.code, type: STRING, description: "Diagnosis code"}
+  - {key: treatment.diagnosis.text, type: STRING, description: "Diagnosis text"}
+  - {key: esr.iban, type: IDENTIFIER, description: "IBAN or QR-IBAN of the payment to the biller (on the main document only)"}
+  - {key: esr.reference_type, type: STRING, description: "Payment reference type, e.g. QRR, SCOR, NON"}
+  - {key: esr.reference_number, type: IDENTIFIER, description: "Payment reference number"}
+  - {key: esr.payment_period_days, type: NUMBER, description: "Payment period in days"}
+  - {key: balance.amount, type: AMOUNT, description: "Total amount of the invoice (on an IV form, the printed total, e.g. Total in CHF)"}
+  - {key: balance.amount_due, type: AMOUNT, description: "Amount still due"}
+  - {key: balance.amount_prepaid, type: AMOUNT, description: "Amount already paid"}
+  - {key: balance.vat.vat_number, type: STRING, description: "VAT number of the biller, e.g. CHE-123.456.789 MWST"}
+  - {key: balance.vat.vat, type: AMOUNT, description: "Total VAT amount"}
+
+collections:
+  - key: services
+    description: Billed service lines (positions) of the invoice
+    fields:
+      - {name: date, type: DATE, description: "Date of the service (never a due date or a guarantee date)"}
+      - {name: tariffType, type: STRING, description: "Tariff type code as printed, e.g. 909 on an IV hearing aid form; XSD code otherwise, e.g. 007, 590, 999"}
+      - {name: code, type: STRING, description: "Tariff position code as printed, e.g. 909.04"}
+      - {name: name, type: STRING, description: "Text of the position"}
+      - {name: quantity, type: NUMBER, description: "Quantity (on a Sumex/Tarmed form the quantity column, not the session number)"}
+      - {name: unitPrice, type: AMOUNT, description: "Unit price"}
+      - {name: amount, type: AMOUNT, description: "Total amount of the line"}
+      - {name: vatRate, type: NUMBER, description: "VAT rate in percent"}
+      - {name: unitMt, type: NUMBER, description: "Tarmed: tax points of the medical part (TP AL / PT PM)"}
+      - {name: scaleFactorMt, type: NUMBER, description: "Tarmed: scale factor of the medical part (f AL / f PM)"}
+      - {name: unitFactorMt, type: NUMBER, description: "Tarmed: tax point value of the medical part (TPW AL / VPT PM)"}
+      - {name: unitTt, type: NUMBER, description: "Tarmed: tax points of the technical part (TP TL / PT PT)"}
+      - {name: scaleFactorTt, type: NUMBER, description: "Tarmed: scale factor of the technical part (f TL / f PT)"}
+      - {name: unitFactorTt, type: NUMBER, description: "Tarmed: tax point value of the technical part (TPW TL / VPT PT)"}
+      - {name: rawText, type: STRING, description: "Whole printed line of the service as read, with all its columns"}

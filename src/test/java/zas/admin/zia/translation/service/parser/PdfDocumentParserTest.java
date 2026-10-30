@@ -39,6 +39,17 @@ class PdfDocumentParserTest {
     }
 
     @Test
+    void renderPages_withMaxPages_rendersOnlyTheFirstPages() throws IOException {
+        byte[] pdfBytes = createMinimalPdf(5);
+
+        RenderedPages rendered = parser.renderPages(pdfBytes, 2);
+
+        assertThat(rendered.pages()).hasSize(2);
+        assertThat(rendered.pageCount()).isEqualTo(5);
+        assertThat(parser.renderPages(pdfBytes, 10).pages()).hasSize(5);
+    }
+
+    @Test
     void renderPages_producesValidPngBytes() throws IOException {
         byte[] pdfBytes = createMinimalPdf(1);
         List<byte[]> pages = parser.renderPages(pdfBytes);

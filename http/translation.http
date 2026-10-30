@@ -6,3 +6,58 @@ Content-Type: application/json
   "text": "Bonjour, comment allez-vous ?",
   "targetLanguage": "de"
 }
+
+### List the extraction profiles
+GET http://localhost:8080/zia-trad/api/v1/extraction-profiles
+
+### Keys of the sumex-invoice extraction profile
+GET http://localhost:8080/zia-trad/api/v1/extraction-profiles/sumex-invoice
+
+### Submit an extraction with a profile (vision model, structured output, async)
+POST http://localhost:8080/zia-trad/api/v1/extractions
+Idempotency-Key: D_0035-3f2a9c1be04d7a61
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="invoice.pdf"
+Content-Type: application/pdf
+
+< ./invoice.pdf
+--boundary
+Content-Disposition: form-data; name="context"
+Content-Type: application/json
+
+{
+  "profile": "sumex-invoice",
+  "documentId": "D_0035",
+  "language": "de",
+  "knownFields": {"patient.ssn": "7568250251199"},
+  "missingFields": ["biller.gln", "treatment.date_begin", "balance.amount", "services"]
+}
+--boundary--
+
+> {% client.global.set("extractionJobId", response.body.jobId); %}
+
+### Submit an ad hoc extraction (no profile: free keys extracted as text)
+POST http://localhost:8080/zia-trad/api/v1/extractions
+Idempotency-Key: contract-42
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="file"; filename="scan.png"
+Content-Type: image/png
+
+< ./scan.png
+--boundary
+Content-Disposition: form-data; name="context"
+Content-Type: application/json
+
+{
+  "documentId": "contract-42",
+  "missingFields": ["contract.number", "customer.name", "signature.date"],
+  "instructions": "The customer is the person who signs at the bottom of the last page."
+}
+--boundary--
+
+### Poll the extraction job
+GET http://localhost:8080/zia-trad/api/v1/extractions/{{extractionJobId}}
