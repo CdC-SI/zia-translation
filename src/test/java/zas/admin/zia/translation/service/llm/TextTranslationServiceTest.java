@@ -13,14 +13,19 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.language.TargetLanguage;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.RETURNS_SELF;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,10 +41,13 @@ class TextTranslationServiceTest {
     @Mock
     private VisionImagePreprocessor imagePreprocessor;
 
+    @Mock
+    private AcronymLookupTool acronymLookupTool;
+
     @Test
     void translatePages_singlePage_returnsTranslation() {
         stubLlmClient("Texte traduit");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Source text"), TargetLanguage.FR);
 
@@ -49,7 +57,7 @@ class TextTranslationServiceTest {
     @Test
     void translatePages_multiplePages_returnsOneTranslationPerPage() {
         stubLlmClient("Translated");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         List<String> result = service.translatePages(List.of("Page 1", "Page 2", "Page 3"), TargetLanguage.DE);
 
@@ -67,7 +75,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePages(List.of("text"), TargetLanguage.FR);
 
         assertThat(result).containsExactly("");
@@ -85,7 +93,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
 
         assertThat(result).containsExactly("Translated via vision");
@@ -104,7 +112,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePages(List.of("Some text"), TargetLanguage.FR, false);
 
         assertThat(result).containsExactly("Plain translated text");
@@ -127,7 +135,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePages(List.of("Some text"), TargetLanguage.FR, true);
 
         assertThat(result).containsExactly("# Markdown translated text");
@@ -148,7 +156,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR, false);
 
         assertThat(result).containsExactly("Plain vision result");
@@ -172,7 +180,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR, true);
 
         assertThat(result).containsExactly("# Vision markdown result");
@@ -190,7 +198,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         StepVerifier.create(service.translatePageStream("Hello world", TargetLanguage.FR))
                 .expectNext("Bonjour")
@@ -211,7 +219,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.DE))
                 .expectNext("Token1")
@@ -233,7 +241,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
 
         verify(imagePreprocessor).toMedia(any(byte[].class));
@@ -255,7 +263,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.DE))
                 .expectNext("Token1")
@@ -274,7 +282,7 @@ class TextTranslationServiceTest {
     @Test
     void translateText_returnsTranslation() {
         stubLlmClient("Bonjour le monde");
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
         String result = service.translateText("Hello world", TargetLanguage.FR);
 
@@ -294,7 +302,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         String result = service.translateText("Some text", TargetLanguage.FR);
 
         assertThat(result).isEqualTo("Translated plain text");
@@ -315,7 +323,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         String result = service.translateText("text", TargetLanguage.FR);
 
         assertThat(result).isEmpty();
@@ -345,7 +353,7 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         service.translatePages(List.of("Bonjour"), TargetLanguage.DE);
 
         assertThat(promptCaptor.getValue())
@@ -369,7 +377,7 @@ class TextTranslationServiceTest {
 
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         service.translatePagesSingleStrategy(List.of(new byte[]{1}), TargetLanguage.IT);
 
         assertThat(messageCaptor.getValue().getText())
@@ -391,11 +399,121 @@ class TextTranslationServiceTest {
 
         when(llmClient.prompt()).thenReturn(requestSpec);
 
-        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor);
+        TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
         service.translateText("100 %s %d", TargetLanguage.EN);
 
         assertThat(promptCaptor.getValue())
                 .contains("into English (ISO 639-1 code \"en\")")
                 .contains("100 %s %d");
+    }
+
+    @Test
+    void translatePages_toolEnabled_offersAcronymToolAndPutsInstructionBeforeTheText() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        withTool().translatePages(List.of("Die AHV"), TargetLanguage.FR);
+
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "fr"));
+        String prompt = promptCaptor.getValue();
+        assertThat(prompt.indexOf("lookup_acronyms"))
+                .isGreaterThan(prompt.indexOf("Return only the translated text"))
+                .isLessThan(prompt.indexOf("Text to translate into French"));
+        assertThat(prompt).endsWith("Die AHV\n");
+    }
+
+    @Test
+    void translatePagesSingleStrategy_toolEnabled_offersAcronymTool() {
+        stubImagePreprocessor();
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(visionClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
+
+        withTool().translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
+
+        verify(requestSpec).messages(messageCaptor.capture());
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "fr"));
+        assertThat(messageCaptor.getValue().getText()).contains("lookup_acronyms");
+    }
+
+    @Test
+    void translateText_toolEnabled_offersAcronymTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Die AHV");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        String result = withTool().translateText("L'AVS", TargetLanguage.DE);
+
+        assertThat(result).isEqualTo("Die AHV");
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "de"));
+        assertThat(promptCaptor.getValue()).contains("lookup_acronyms").endsWith("L'AVS\n");
+    }
+
+    @Test
+    void translatePageStream_toolEnabled_offersAcronymTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Bonjour"));
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        StepVerifier.create(withTool().translatePageStream("Guten Tag", TargetLanguage.DE))
+                .expectNext("Bonjour")
+                .verifyComplete();
+
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "de"));
+    }
+
+    @Test
+    void translatePageSingleStrategyStream_toolEnabled_offersAcronymTool() {
+        stubImagePreprocessor();
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Token"));
+        when(visionClient.prompt()).thenReturn(requestSpec);
+
+        StepVerifier.create(withTool().translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.IT))
+                .expectNext("Token")
+                .verifyComplete();
+
+        verify(requestSpec).tools(acronymLookupTool);
+        verify(requestSpec).toolContext(Map.of(AcronymLookupTool.TARGET_LANGUAGE, "it"));
+    }
+
+    @Test
+    void translatePages_toolDisabled_doesNotOfferTool() {
+        ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
+        when(llmClient.prompt()).thenReturn(requestSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty())
+                .translatePages(List.of("Die AHV"), TargetLanguage.FR);
+
+        verify(requestSpec).user(promptCaptor.capture());
+        verify(requestSpec, never()).tools(any());
+        verify(requestSpec, never()).toolContext(any());
+        assertThat(promptCaptor.getValue()).doesNotContain("lookup_acronyms");
+    }
+
+    private TextTranslationService withTool() {
+        return new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.of(acronymLookupTool));
+    }
+
+    private static ChatClient.ChatClientRequestSpec selfReturningCallSpec(String content) {
+        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(callResponseSpec.content()).thenReturn(content);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(requestSpec.call()).thenReturn(callResponseSpec);
+        return requestSpec;
+    }
+
+    private static ChatClient.ChatClientRequestSpec selfReturningStreamSpec(Flux<String> tokens) {
+        ChatClient.StreamResponseSpec streamResponseSpec = mock(ChatClient.StreamResponseSpec.class);
+        when(streamResponseSpec.content()).thenReturn(tokens);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(requestSpec.stream()).thenReturn(streamResponseSpec);
+        return requestSpec;
     }
 }
