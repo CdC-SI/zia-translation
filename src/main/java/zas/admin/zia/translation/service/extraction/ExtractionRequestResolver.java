@@ -13,8 +13,9 @@ import java.util.Set;
  * Validates an {@link ExtractionContext} and resolves the definitions of the requested values.
  * <ul>
  *     <li>with a profile, the {@code missingFields} are looked up in the profile; unknown keys are ignored with a
- *     warning;</li>
- *     <li>without a profile, every key is extracted as a {@link FieldType#STRING} value.</li>
+ *     warning; when {@code missingFields} is empty, every field and collection of the profile is requested;</li>
+ *     <li>without a profile, every key is extracted as a {@link FieldType#STRING} value; {@code missingFields}
+ *     must then contain at least one key, since there is no profile to default to.</li>
  * </ul>
  */
 @Component
@@ -40,9 +41,6 @@ class ExtractionRequestResolver {
             throw new InvalidDocumentException("Part 'context' is missing.");
         }
         List<String> keys = context.missingFields();
-        if (keys.isEmpty()) {
-            throw new InvalidDocumentException("'missingFields' must contain at least one key.");
-        }
         if (keys.size() > maxFields) {
             throw new InvalidDocumentException("'missingFields' exceeds %d keys.".formatted(maxFields));
         }
@@ -50,7 +48,13 @@ class ExtractionRequestResolver {
             throw new InvalidDocumentException("'instructions' exceeds %d characters.".formatted(maxInstructionsLength));
         }
         validatePageHints(context.pageHints());
-        return context.profile() == null ? resolveAdHoc(context) : resolveWithProfile(context);
+        if (context.profile() == null) {
+            if (keys.isEmpty()) {
+                throw new InvalidDocumentException("'missingFields' must contain at least one key.");
+            }
+            return resolveAdHoc(context);
+        }
+        return resolveWithProfile(context);
     }
 
     private static void validatePageHints(List<PageClassification> hints) {
@@ -89,10 +93,16 @@ class ExtractionRequestResolver {
     private ExtractionRequest resolveWithProfile(ExtractionContext context) {
         ExtractionProfile profile = registry.find(context.profile())
                 .orElseThrow(() -> new InvalidDocumentException("Unknown extraction profile."));
+        List<String> requestedKeys = context.missingFields();
+        if (requestedKeys.isEmpty()) {
+            // default to every field/collection of the profile rather than forcing the client to repeat them all.
+            requestedKeys = new ArrayList<>(profile.fields().keySet());
+            requestedKeys.addAll(profile.collections().keySet());
+        }
         List<FieldDefinition> fields = new ArrayList<>();
         List<CollectionDefinition> collections = new ArrayList<>();
         List<String> ignored = new ArrayList<>();
-        for (String key : context.missingFields()) {
+        for (String key : requestedKeys) {
             FieldDefinition field = profile.fields().get(key);
             CollectionDefinition collection = profile.collections().get(key);
             if (field != null) {
@@ -109,9 +119,13 @@ class ExtractionRequestResolver {
         List<String> warnings = ignored.isEmpty()
                 ? List.of()
                 : List.of("Keys unknown to profile '%s' ignored: %s".formatted(profile.id(), abbreviate(ignored)));
+        if (profile.perPage() && !context.pageHints().isEmpty()) {
+            warnings = new ArrayList<>(warnings);
+            warnings.add("'pageHints' ignored: profile '%s' extracts each page on its own".formatted(profile.id()));
+        }
         return new ExtractionRequest(profile.id(), profile.instructions(), context.documentId(), context.language(),
                 context.knownFields(), context.instructions(), fields, collections, warnings, context.pageHints(),
-                profile.pageClassification());
+                profile.pageClassification(), profile.perPage(), profile.simpleOutput());
     }
 
     private static String abbreviate(List<String> keys) {

@@ -33,30 +33,46 @@ import static zas.admin.zia.translation.service.extraction.ExtractionSchemaGener
 class VisionFieldExtractor {
 
     private static final Logger log = LoggerFactory.getLogger(VisionFieldExtractor.class);
+    private static final List<String> REQUIRED_ENUM_FALLBACK_VALUES = List.of("UNCLEAR", "UNKNOWN");
 
-    static final String SYSTEM_PROMPT = """
+    /**
+     * Rules for every profile. What is specific to a kind of document belongs to the instructions of its profile,
+     * sent in the user prompt.
+     */
+    private static final String COMMON_RULES = """
             You extract data from a document. You receive the images of one or several pages of an uploaded file, \
             in the order given in the request.
 
             Rules:
-            - Return only values that are actually printed on these images. Never guess, infer or invent a value. \
-            If a value is not printed, set "value" and "evidence" to null and "confidence" to 0.
-            - "evidence" is the exact text the value is read from, copied as printed (with its label when it \
-            helps, e.g. "Rechnungsdatum: 12.03.2024").
-            - "value" is the value written in the requested format.
-            - "confidence" is your confidence, between 0 and 1, that the value is exactly the one printed.
-            - When "page" is requested, it is the page of the file (as numbered in the request) the value is read on.
+            - Return only values that are actually printed on these images. Never guess, infer or invent a value.
             - For each requested collection, return one item per row printed on these images (an empty array if \
             none). A row is returned once, even if it is repeated or continued on another page.
-            - On a form with check boxes or with a list of printed items, only the items that are checked (cross, \
-            tick, filled box) or filled in (quantity, amount or text written) are rows: never return an item that is \
-            only printed. Give its code as printed, and describe the state of the box in "evidence" (e.g. "[x] \
-            <code> <label>"). If the state of a box is uncertain, say it in "warnings".
-            - "documentType" is a short free classification of the document (e.g. medical_invoice), null if unknown.
-            - "warnings" lists anything a reviewer should know (unreadable area, cut page, ambiguous value, \
-            uncertain check box...). Never report the page numbering of the file as a problem.
             - Values listed as already known are hints to understand the document: never copy them into another key.
             """;
+
+    private static final String DETAILED_RULES = """
+            - Each value is an object {value, evidence, confidence, page}. If a value is not printed, set "value" \
+            and "evidence" to null and "confidence" to 0.
+            - "value" is the value written in the requested format.
+            - "evidence" is the exact text the value is read from, copied as printed (with its label when it helps).
+            - "confidence" is your confidence, between 0 and 1, that the value is exactly the one printed.
+            - "page" is the page of the file (as numbered in the request) the value is read on.
+            - "documentType" is a short free classification of the document, null if unknown.
+            - "warnings" lists anything a reviewer should know (unreadable area, cut page, ambiguous value...). \
+            Never report the page numbering of the file as a problem.
+            """;
+
+    private static final String SIMPLE_RULES = """
+            - Each value is returned alone, written in the requested format, without evidence or comment. If a \
+            value is not printed, return null when the key allows it.
+            """;
+
+    static final String DETAILED_SYSTEM_PROMPT = COMMON_RULES + DETAILED_RULES;
+    static final String SIMPLE_SYSTEM_PROMPT = COMMON_RULES + SIMPLE_RULES;
+
+    static String systemPrompt(boolean simpleOutput) {
+        return simpleOutput ? SIMPLE_SYSTEM_PROMPT : DETAILED_SYSTEM_PROMPT;
+    }
 
     private final ChatClient visionClient;
     private final VisionImagePreprocessor imagePreprocessor;
@@ -115,8 +131,8 @@ class VisionFieldExtractor {
             throw new IllegalArgumentException("No page to extract");
         }
         List<Integer> pages = pageImages.stream().map(PageImage::page).toList();
-        boolean withPage = pages.size() > 1;
-        ObjectNode schema = ExtractionSchemaGenerator.generate(request.fields(), request.collections(), withPage);
+        ObjectNode schema = ExtractionSchemaGenerator.generate(request.fields(), request.collections(),
+                request.simpleOutput());
         String schemaJson = objectMapper.writeValueAsString(schema);
         List<Media> media = pageImages.stream().map(image -> imagePreprocessor.toMedia(image.image())).toList();
         UserMessage message = UserMessage.builder()
@@ -128,7 +144,7 @@ class VisionFieldExtractor {
         try {
             answer = visionClient.prompt()
                     .options(chatOptions(schemaJson))
-                    .system(SYSTEM_PROMPT)
+                    .system(systemPrompt(request.simpleOutput()))
                     .messages(message)
                     .call()
                     .content();
@@ -203,8 +219,7 @@ class VisionFieldExtractor {
     /**
      * Describes the images sent with the numbering of the file, which is technical: the model must neither confuse
      * it with the numbering printed on the document nor report the difference.
-     */
-    /**
+     *
      * @param mainDocument description of the main document when the pages are the main document of a classified
      *                     file, {@code null} otherwise
      */
@@ -318,7 +333,7 @@ class VisionFieldExtractor {
     private ExtractedField readField(FieldDefinition field, JsonNode node, List<Integer> pages, String label,
                                      List<String> warnings) {
         if (node == null || node.isNull()) {
-            return null;
+            return missingRequiredValue(field, label, pages.getFirst(), warnings);
         }
         String rawValue;
         String evidence = null;
@@ -339,7 +354,7 @@ class VisionFieldExtractor {
             rawValue = textOrNull(node);
         }
         if (rawValue == null) {
-            return null;
+            return missingRequiredValue(field, label, page, warnings);
         }
         String value = FieldValueNormalizer.normalize(field, rawValue);
         if (value == null) {
@@ -349,6 +364,34 @@ class VisionFieldExtractor {
         }
         double confidence = confidenceCalculator.compute(field, value, evidence, modelConfidence);
         return new ExtractedField(value, confidence, page, evidence);
+    }
+
+    private ExtractedField missingRequiredValue(FieldDefinition field, String label, int page, List<String> warnings) {
+        if (field.nullable()) {
+            return null;
+        }
+        warnings.add("Required value of '%s' missing on page %d".formatted(label, page));
+        String fallback = missingRequiredFallbackEnumValue(field);
+        if (fallback == null) {
+            return null;
+        }
+        double confidence = confidenceCalculator.compute(field, fallback, null, null);
+        return new ExtractedField(fallback, confidence, page, null);
+    }
+
+    private static String missingRequiredFallbackEnumValue(FieldDefinition field) {
+        if (field.type() != FieldType.ENUM) {
+            return null;
+        }
+        for (String candidate : REQUIRED_ENUM_FALLBACK_VALUES) {
+            Optional<String> value = field.values().stream()
+                    .filter(defined -> defined.equalsIgnoreCase(candidate))
+                    .findFirst();
+            if (value.isPresent()) {
+                return value.get();
+            }
+        }
+        return null;
     }
 
     private static JsonNode child(JsonNode parent, String name) {

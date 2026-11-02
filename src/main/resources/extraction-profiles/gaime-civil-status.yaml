@@ -1,0 +1,80 @@
+# Civil-status attestation (7 checkboxes), read with the generic field-extraction pipeline.
+#
+# perPage: each page of the file is extracted on its own (no page classification) and returned as is in
+# result.pageResults (one entry per analysed page, in page order), without merging the pages. The structured output
+# of the model is a fixed object for every page: "civil_status_detected" (is the page the attestation?),
+# "signature_present" and the
+# state of each of the seven boxes are always requested keys of the strict JSON Schema. All 9 fields are declared
+# "nullable: false": the schema itself forbids a null value (and null is not part of the ENUM "values"), forcing the
+# model to commit to an explicit value (e.g. "false" for civil_status_detected / "UNCLEAR" for a box) instead of
+# answering
+# null. If the model still omits a value despite the schema, the warning
+# "Required value of '<key>' missing on page <n>" is added to result.warnings and the service keeps the key with an
+# uncertainty value when the ENUM contains one (UNCLEAR/UNKNOWN).
+#
+# The caller resolves the civil status from result.pageResults: the first page whose civil_status_detected is "true"
+# is the
+# attestation (none: unknown document), then:
+#   - signature_present = "false"                         -> unsigned
+#   - "signature_present" = "UNCLEAR" or at least one box "UNCLEAR" -> unsure
+#   - no box "MARKED"                                -> no box
+#   - more than one box "MARKED"                     -> multiple boxes
+#   - exactly one box "MARKED"                       -> civil status = that box
+# Request: {"profile": "gaime-civil-status"} ("missingFields" can be omitted: all 9 keys are requested by default).
+#
+# simpleOutput: the model is only asked for the bare value of each field (no evidence/confidence/page, no
+# documentType/warnings in the JSON Schema), and each field in result.pageResults[].fields only carries "value".
+# Only structural warnings (e.g. a required value missing despite the schema) are reported.
+id: gaime-civil-status
+description: Civil status (one of 7 boxes) read from a signed civil-status attestation, page by page
+instructions: |
+  The file may contain a civil-status attestation ("ATTESTATION D'ÉTAT CIVIL" / "ZIVILSTANDSBESTÄTIGUNG" /
+  "CERTIFICADO DE ESTADO CIVIL" / "ATTESTATO DELLO STATO CIVILE" / "ATESTADO DE ESTADO CIVIL" / "CIVIL STATUS
+  CERTIFICATE" or an equivalent title in another language): a form with one of these titles and a list of seven
+  civil-status options, one per line, each preceded by a printed square checkbox:
+  1. "married": FR "marié(e)" / DE "verheiratet" / ES "casado(a)" / IT "sposato(a)" / PT "casado(a)" / EN "married"
+  2. "widowed": FR "veuf/veuve" / DE "verwitwet" / ES "viudo(a)" / IT "vedovo(a)" / PT "viúvo(a)" / EN "widowed"
+  3. "divorced": FR "divorcé(e)" / DE "geschieden" / ES "divorciado(a)" / IT "divorziato(a)" / PT "divorciado(a)" /
+     EN "divorced"
+  4. "legally_separated": FR "séparé(e) de droit (par jugement)" / DE "gerichtlich getrennt (durch Urteil)" /
+     ES "separado(a) legalmente (por sentencia)" / IT "separato(a) legalmente (tramite sentenza)" /
+     PT "separado(a) por decisão judicial" / EN "legally separated (by judgment)"
+  5. "married_lpart": FR "marié(e) LPart**" / DE "verheiratet/PartG**" / ES "casado(a) LPart**" /
+     IT "sposato(a) LUD**" / PT "casado(a) LPart**" / EN "married LPart**"
+  6. "divorced_lpart": FR "divorcé(e) LPart**" / DE "geschieden/PartG**" / ES "divorciado(a) LPart**" /
+     IT "divorziato(a) LUD**" / PT "divorciado(a) LPart**" / EN "divorced LPart**"
+  7. "widowed_lpart": FR "veuf/veuve LPart**" / DE "verwitwet/PartG**" / ES "viudo(a) LPart**" /
+     IT "vedovo(a) LUD**" / PT "viúvo(a) LPart**" / EN "widowed LPart**"
+  "civil_status_detected" is "true" only if the page has this structure (one of these titles and the seven
+  checkboxes),
+  "false" if clearly not this form, and "UNCLEAR" only when the page is too unreadable/damaged to decide. When it is
+  "false", "signature_present" is "false" and every box is "UNMARKED".
+  A mark can be a tick, an X, a filled/scribbled box, a circle around the box or label, or a stroke just next to
+  the square. On a blank form all seven checkboxes are printed identically as small hollow squares: anything that
+  makes a box look different from a hollow square was added by the person (a tick, an X, a circle, or a box
+  completely filled in / solid black).
+  Compare each box with the other six, then inspect each of the seven boxes individually:
+  - "MARKED": a clear hand-drawn mark on, in, or immediately next to the box, on the same line as its label. A
+    solid black / filled-in box is "MARKED".
+  - "UNMARKED": only the printed square outline, nothing else.
+  - "UNCLEAR": unsure (faint or ambiguous ink, blur, damage, erasure, correction, crossed-out or overwritten mark,
+    mark between two lines).
+  Match each mark to the label printed on the same line, not to its position in the list. Report honestly: if two
+  boxes have ink, mark both as "MARKED", do not try to pick a single answer.
+  "signature_present" is "true" if the form carries a handwritten signature (and typically a place and date near the
+  signature), "false" if clearly absent, and "UNCLEAR" if unreadable or ambiguous.
+
+
+perPage: true
+simpleOutput: true
+
+fields:
+  - {key: civil_status_detected, type: ENUM, values: ['true', 'false', 'UNCLEAR'], nullable: false, description: "Whether the page is a civil-status attestation (title and seven checkboxes)"}
+  - {key: signature_present, type: ENUM, values: ['true', 'false', 'UNCLEAR'], nullable: false, description: "Whether the form carries a handwritten signature"}
+  - {key: box_married, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'married' checkbox"}
+  - {key: box_widowed, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'widowed' checkbox"}
+  - {key: box_divorced, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'divorced' checkbox"}
+  - {key: box_legally_separated, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'legally separated' checkbox"}
+  - {key: box_married_lpart, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'married LPart' checkbox"}
+  - {key: box_divorced_lpart, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'divorced LPart' checkbox"}
+  - {key: box_widowed_lpart, type: ENUM, values: [MARKED, UNCLEAR, UNMARKED], nullable: false, description: "State of the 'widowed LPart' checkbox"}

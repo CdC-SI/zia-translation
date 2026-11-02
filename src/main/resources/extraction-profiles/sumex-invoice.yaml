@@ -11,6 +11,10 @@ instructions: |
   invoice form (e.g. form 300.001 "Rechnung für Hörgeräteversorgung" / "Facture pour la remise d'appareils
   auditifs", 2 pages). Copies of invoices of the seller or of the manufacturer attached to the file are supporting
   documents: never take a value from them.
+  On a form with check boxes or with a list of printed items, only the items that are checked (cross, tick, filled
+  box) or filled in (quantity, amount or text written) are rows: never return an item that is only printed. Give its
+  code as printed and describe the state of the box in the evidence (e.g. "[x] <code> <label>"). If the state of a
+  box is uncertain, say it in the warnings.
   On an IV form, the services are the tariff positions printed on the form (e.g. 909.04 "Reparatur Elektronik")
   whose box is checked or whose quantity/amount is filled in, with the code and the tariff type as printed (e.g. 909),
   once per row (e.g. once for the right and once for the left hearing aid when both are checked); the evidence

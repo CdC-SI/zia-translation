@@ -22,7 +22,8 @@ import java.util.concurrent.RejectedExecutionException;
  * <p>
  * When the profile classifies its pages (or the client gives page hints), the pages are first classified (main
  * document, supporting documents, other pages) and the values are extracted from the pages of the main document
- * only, sent together. Otherwise, each page is extracted on its own and the results are merged.
+ * only, sent together. Otherwise, each page is extracted on its own and the results are merged, or returned page by
+ * page for a {@code perPage} profile.
  */
 @Service
 public class ExtractionService {
@@ -84,8 +85,8 @@ public class ExtractionService {
 
         ExtractionJobStore.Submission submission;
         try {
-            submission = jobStore.submit(idempotencyKey,
-                    created -> executor.execute(() -> process(created.jobId(), document, parser, request)));
+            submission = jobStore.submit(idempotencyKey, created -> executor.execute(() ->
+                    process(created.jobId(), document, parser, request)));
         } catch (RejectedExecutionException ex) {
             throw new ExtractionCapacityExceededException("Too many extractions in progress, retry later.", ex);
         }
@@ -122,22 +123,10 @@ public class ExtractionService {
     }
 
     private ExtractionResponse extract(byte[] document, DocumentParser parser, ExtractionRequest request) {
-        RenderedPages rendered;
-        try {
-            rendered = parser.renderPages(document, maxPages);
-        } catch (IOException | RuntimeException ex) {
-            throw new UnreadableDocumentException("The document cannot be read.", ex);
-        }
+        List<String> warnings = new ArrayList<>(request.warnings());
+        RenderedPages rendered = renderPages(document, parser, warnings);
         List<byte[]> pages = rendered.pages();
         int pageCount = rendered.pageCount();
-        if (pages.isEmpty()) {
-            throw new UnreadableDocumentException("The document has no page.", null);
-        }
-
-        List<String> warnings = new ArrayList<>(request.warnings());
-        if (pageCount > pages.size()) {
-            warnings.add("Only the first %d of %d pages were analysed".formatted(pages.size(), pageCount));
-        }
         if (request.classifiesPages()) {
             return extractMainDocument(pages, pageCount, request, warnings);
         }
@@ -157,7 +146,67 @@ public class ExtractionService {
         if (extractions.isEmpty()) {
             throw new AllPagesFailedException("No page of the document could be analysed.", lastFailure);
         }
+        if (request.perPage()) {
+            return perPage(request, extractions, warnings);
+        }
         return ExtractionResultMerger.merge(request, extractions, warnings);
+    }
+
+    /** Returns the values of each page as read, without merging the pages. */
+    private static ExtractionResponse perPage(ExtractionRequest request, List<PageExtraction> extractions,
+                                              List<String> warnings) {
+        Set<String> allWarnings = new LinkedHashSet<>(warnings);
+        List<PageResult> results = new ArrayList<>(extractions.size());
+        for (PageExtraction extraction : extractions) {
+            Map<String, ExtractedField> fields = extraction.fields();
+            Map<String, List<Map<String, ExtractedField>>> collections = extraction.collections();
+            if (request.simpleOutput()) {
+                fields = simplify(fields);
+                collections = simplifyRows(collections);
+            }
+            results.add(new PageResult(extraction.page(), extraction.documentType(), fields,
+                    collections.isEmpty() ? null : collections));
+            extraction.warnings().forEach(warning ->
+                    allWarnings.add("%s: %s".formatted(extraction.label(), warning)));
+        }
+        return new ExtractionResponse(request.profile(), null, null, null, List.copyOf(allWarnings), null,
+                List.copyOf(results));
+    }
+
+    /**
+     * Keeps only the {@code value} of each field: the confidence computed by the service (and the page) are dropped,
+     * the model being asked for the bare value only (simple schema).
+     */
+    private static Map<String, ExtractedField> simplify(Map<String, ExtractedField> fields) {
+        Map<String, ExtractedField> simplified = new LinkedHashMap<>();
+        fields.forEach((key, field) -> simplified.put(key, new ExtractedField(field.value(), null, null, null)));
+        return simplified;
+    }
+
+    private static Map<String, List<Map<String, ExtractedField>>> simplifyRows(
+            Map<String, List<Map<String, ExtractedField>>> collections) {
+        Map<String, List<Map<String, ExtractedField>>> simplified = new LinkedHashMap<>();
+        collections.forEach((key, rows) ->
+                simplified.put(key, rows.stream().map(ExtractionService::simplify).toList()));
+        return simplified;
+    }
+
+    /** Renders the analysed pages, with a warning when the document has more pages than analysed. */
+    private RenderedPages renderPages(byte[] document, DocumentParser parser, List<String> warnings) {
+        RenderedPages rendered;
+        try {
+            rendered = parser.renderPages(document, maxPages);
+        } catch (IOException | RuntimeException ex) {
+            throw new UnreadableDocumentException("The document cannot be read.", ex);
+        }
+        if (rendered.pages().isEmpty()) {
+            throw new UnreadableDocumentException("The document has no page.", null);
+        }
+        if (rendered.pageCount() > rendered.pages().size()) {
+            warnings.add("Only the first %d of %d pages were analysed"
+                    .formatted(rendered.pages().size(), rendered.pageCount()));
+        }
+        return rendered;
     }
 
     /**

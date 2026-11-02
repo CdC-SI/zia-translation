@@ -39,6 +39,13 @@ Un pied de page signale que le document a été traduit par une IA.
 
 Le client principal est `ole-sumex-invoice-parser`, avec le profil `sumex-invoice` (factures envoyées à l'AI/IV).
 
+Le profil `gaime-civil-status` lit une attestation d'état civil à 7 cases. C'est un profil YAML ordinaire
+(`extraction-profiles/gaime-civil-status.yaml`) déclaré `perPage: true` : chaque page est extraite seule, sans
+classification, et renvoyée telle quelle dans `result.pageResults` (une entrée par page, sans fusion). Chaque page a
+les mêmes clés fixes : `civil_status_detected` (la page est-elle l'attestation ?), `signature_present` et l'état de chacune des 7 cases
+(`box_*`). Le service ne calcule **pas** le statut civil final : c'est l'appelant qui le fait. Voir la section
+« Implémentation actuelle » de `specifications/gaime-civil-status/spec.md`.
+
 ## 2. Flux d'une extraction de données
 
 ```
@@ -54,7 +61,7 @@ POST /extractions ──► validation ──► job PENDING ──► (exécute
                  │                                  │
                  │                     extraction multi-images des pages MAIN
                  └──────────────┬───────────────────┘
-                        fusion des résultats ──► job SUCCEEDED / FAILED
+         fusion des résultats (ou pageResults si perPage) ──► job SUCCEEDED / FAILED
 GET /extractions/{jobId} ◄── polling (Retry-After)
 ```
 
@@ -69,13 +76,17 @@ Le service fait les vérifications suivantes :
 1. **`Idempotency-Key`** : obligatoire, 128 caractères au maximum. Une clé déjà connue renvoie le job existant,
    sans nouveau traitement.
 2. **Contexte** (`ExtractionRequestResolver`) :
-   - `missingFields` : entre 1 et `zia.extraction.max-fields` clés (80 par défaut) ;
+   - `missingFields` : au maximum `zia.extraction.max-fields` clés (80 par défaut) ; obligatoire (≥ 1 clé) pour une
+     requête ad hoc (sans profil), optionnelle avec un profil (voir point 3) ;
    - `instructions` : `zia.extraction.max-instructions-length` caractères au maximum ;
    - `pageHints` : page ≥ 1, `documentRole` obligatoire, `formId` de 35 caractères au maximum, pas de page en double.
 3. **Résolution des clés** :
    - **avec profil** : chaque clé de `missingFields` est cherchée parmi les champs et collections du profil. Une
-     clé inconnue est ignorée, avec un avertissement. Si aucune clé n'est connue, la requête est refusée (400) ;
-   - **sans profil** (requête ad hoc) : chaque clé est extraite comme texte libre.
+     clé inconnue est ignorée, avec un avertissement. Si `missingFields` est vide, toutes les clés du profil sont
+     demandées (pas besoin de les répéter à chaque appel). Si aucune clé n'est finalement connue, la requête est
+     refusée (400) ;
+   - **sans profil** (requête ad hoc) : chaque clé est extraite comme texte libre ; `missingFields` doit alors
+     contenir au moins une clé, faute de profil pour la définir.
 4. **Document** : taille maximale `zia.translation.pdf.max-file-size`. Le type est détecté d'après la signature du
    contenu, puis d'après le content-type déclaré.
 
@@ -92,13 +103,19 @@ Un profil contient :
   propres au domaine…) ;
 - **`fields`** et **`fieldGroups`** : définition des valeurs à extraire (`key`, `type`, `description`, `values`).
   Un `fieldGroup` produit une clé `<préfixe>.<nom>` pour chaque préfixe (ex. `biller.gln`, `patient.gln`…).
-  Les types sont `STRING`, `DATE`, `AMOUNT`, `NUMBER`, `IDENTIFIER` et `ENUM` ;
+  Les types sont `STRING`, `DATE`, `AMOUNT`, `NUMBER`, `IDENTIFIER` et `ENUM`. `nullable` (`true` par défaut) :
+  avec `nullable: false`, le schéma interdit la réponse `null` et le modèle doit choisir une valeur. Ce n'est permis
+  que pour un champ `ENUM` (qui doit alors proposer une valeur « incertaine », p. ex. `UNCLEAR`) : sur un autre type,
+  le modèle inventerait une valeur quand rien n'est imprimé, et le profil est rejeté au démarrage ;
 - **`collections`** : lignes répétées (ex. `services` : date, code, quantité, montant…) ;
 - **`pageClassification`** (optionnel) : active la classification des pages et décrit le domaine.
   - `mainDocument` est une phrase courte qui décrit le document principal. Elle est utilisée par les prompts de
     classification et d'extraction.
   - `instructions` donne le contexte métier pour distinguer le document principal des justificatifs (formulaires
     connus, types de pièces jointes…).
+- **`perPage`** (optionnel, `false` par défaut) : chaque page est extraite seule et renvoyée telle quelle dans
+  `result.pageResults` (une entrée par page analysée), sans fusion des pages. Incompatible avec
+  `pageClassification`. Les `pageHints` sont alors ignorés, avec un avertissement. Exemple : `gaime-civil-status`.
 
 ```yaml
 pageClassification:
@@ -123,7 +140,7 @@ avertissement si le document en a davantage. Un document illisible ou sans page 
 ### 2.4 Classification des pages
 
 La classification n'a lieu que si le profil déclare une section `pageClassification` (cas de `sumex-invoice`) ou si
-la requête contient des `pageHints`. Hypothèse du contrat : **un fichier contient un seul document principal**,
+la requête contient des `pageHints`, et jamais pour un profil `perPage`. Hypothèse du contrat : **un fichier contient un seul document principal**,
 éventuellement accompagné de justificatifs.
 
 1. **Hints du client** : une page avec un `pageHint` est reprise telle quelle et n'est pas reclassée. Un hint qui
@@ -164,13 +181,18 @@ La classification finale est renvoyée dans `result.pages`. Les pages non class�
   1792 px par défaut, JPEG `zia.extraction.vision.jpeg-quality` = 0.9). Cette résolution plus haute permet de lire
   les cases à cocher et les montants.
 - **Sortie structurée** : un JSON Schema strict est généré à partir des clés demandées (`ExtractionSchemaGenerator`).
-  Chaque valeur prend la forme `{value, evidence, confidence[, page]}`. Avec
+  Chaque valeur prend la forme `{value, evidence, confidence, page}` (`page` : page du fichier où la valeur est lue,
+  parmi les pages envoyées). Avec `simpleOutput`, seule la valeur brute est demandée. Avec
   `zia.extraction.response-format=json_object`, le schéma est inclus dans le prompt.
 - **Prompt** :
-  - règles génériques : ne renvoyer que des valeurs imprimées, preuve copiée telle qu'imprimée ;
-  - pour un formulaire, seules les cases **cochées ou remplies** donnent des lignes ;
-  - contenu propre à la requête : instructions du profil, description de chaque clé et de son format, valeurs déjà
-    connues (`knownFields`, en indice seulement), instructions du client.
+  - prompt système commun à tous les profils : ne renvoyer que des valeurs imprimées, une ligne de collection par
+    ligne imprimée, valeurs connues en indice seulement ;
+  - complété selon `simpleOutput` : `value`/`evidence`/`confidence`/`page`, `documentType` et `warnings` en mode
+    détaillé, valeur seule en mode simple ;
+  - ce qui est propre à un type de document (p. ex. pour `sumex-invoice`, seules les cases **cochées ou remplies**
+    donnent des lignes) se trouve dans les `instructions` du profil ;
+  - contenu propre à la requête (prompt utilisateur) : instructions du profil, description de chaque clé et de son
+    format, valeurs déjà connues (`knownFields`, en indice seulement), instructions du client.
 
 Un appel en échec donne un avertissement. Si **aucun** appel ne réussit, le job échoue (`EXTRACTION_FAILED`).
 

@@ -12,6 +12,9 @@ import java.util.Map;
  * @param pageHints           classification of pages given by the client
  * @param pageClassification  domain description of the profile to classify the pages, {@code null} when the
  *                            profile does not classify its pages
+ * @param perPage             each page is extracted on its own and returned without merging
+ * @param simpleOutput        the model is asked for the bare value of each field only (simple schema) and each
+ *                            field of the response only carries its {@code value}
  */
 record ExtractionRequest(
         String profile,
@@ -24,7 +27,9 @@ record ExtractionRequest(
         List<CollectionDefinition> collections,
         List<String> warnings,
         List<PageClassification> pageHints,
-        PageClassificationSettings pageClassification) {
+        PageClassificationSettings pageClassification,
+        boolean perPage,
+        boolean simpleOutput) {
 
     ExtractionRequest {
         knownFields = knownFields == null ? Map.of() : knownFields;
@@ -36,14 +41,25 @@ record ExtractionRequest(
 
     ExtractionRequest(String profile, String profileInstructions, String documentId, String language,
                       Map<String, String> knownFields, String instructions, List<FieldDefinition> fields,
+                      List<CollectionDefinition> collections, List<String> warnings,
+                      List<PageClassification> pageHints, PageClassificationSettings pageClassification) {
+        this(profile, profileInstructions, documentId, language, knownFields, instructions, fields, collections,
+                warnings, pageHints, pageClassification, false, false);
+    }
+
+    ExtractionRequest(String profile, String profileInstructions, String documentId, String language,
+                      Map<String, String> knownFields, String instructions, List<FieldDefinition> fields,
                       List<CollectionDefinition> collections, List<String> warnings) {
         this(profile, profileInstructions, documentId, language, knownFields, instructions, fields, collections,
                 warnings, null, null);
     }
 
-    /** The pages are classified when the profile classifies its pages or when the client gives page hints. */
+    /**
+     * The pages are classified when the profile classifies its pages or when the client gives page hints, never for
+     * a {@code perPage} profile.
+     */
     boolean classifiesPages() {
-        return pageClassification != null || !pageHints.isEmpty();
+        return !perPage && (pageClassification != null || !pageHints.isEmpty());
     }
 
     /** Domain description of the pages, generic when the profile does not describe them. */

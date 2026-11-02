@@ -69,8 +69,8 @@ class ExtractionServiceTest {
     }
 
     private ExtractionService service(int maxPages) {
-        return new ExtractionService(jobStore, resolver, extractor, classifier, List.of(pdfParser, imageParser),
-                executor, DataSize.ofKilobytes(1), maxPages, 4);
+        return new ExtractionService(jobStore, resolver, extractor, classifier,
+                List.of(pdfParser, imageParser), executor, DataSize.ofKilobytes(1), maxPages, 4);
     }
 
     private ExtractionService classifyingService(int maxPages, int maxImagesPerCall) {
@@ -492,5 +492,64 @@ class ExtractionServiceTest {
         assertThat(ExtractionService.detectMimeType("GIF89a".getBytes(StandardCharsets.US_ASCII))).isEqualTo("image/gif");
         assertThat(ExtractionService.detectMimeType("BM..".getBytes(StandardCharsets.US_ASCII))).isEqualTo("image/bmp");
         assertThat(ExtractionService.detectMimeType("%PD".getBytes(StandardCharsets.US_ASCII))).isNull();
+    }
+
+    private static final ExtractionContext CIVIL_STATUS_CONTEXT = new ExtractionContext("gaime-civil-status", null,
+            null, Map.of(), List.of("civil_status_detected", "signature_present", "box_married", "box_widowed"), null,
+            List.of(new PageClassification(1, DocumentRole.MAIN, null, null, null, null)));
+
+    private static Map<String, ExtractedField> civilStatusFields(int page, boolean attestation) {
+        Map<String, ExtractedField> fields = new java.util.LinkedHashMap<>();
+        fields.put("civil_status_detected", new ExtractedField(String.valueOf(attestation), 0.9, page, null));
+        fields.put("signature_present", new ExtractedField(String.valueOf(attestation), 0.9, page, null));
+        fields.put("box_married", new ExtractedField(attestation ? "MARKED" : "UNMARKED", 0.9, page, null));
+        fields.put("box_widowed", new ExtractedField("UNMARKED", 0.9, page, null));
+        return fields;
+    }
+
+    /** {@code gaime-civil-status} is {@code simpleOutput}: no {@code confidence}/{@code page} in the response. */
+    private static Map<String, ExtractedField> simplifiedCivilStatusFields(boolean attestation) {
+        Map<String, ExtractedField> fields = new java.util.LinkedHashMap<>();
+        fields.put("civil_status_detected", new ExtractedField(String.valueOf(attestation), null, null, null));
+        fields.put("signature_present", new ExtractedField(String.valueOf(attestation), null, null, null));
+        fields.put("box_married", new ExtractedField(attestation ? "MARKED" : "UNMARKED", null, null, null));
+        fields.put("box_widowed", new ExtractedField("UNMARKED", null, null, null));
+        return fields;
+    }
+
+    /**
+     * {@code gaime-civil-status} is a {@code perPage} profile: each page is extracted on its own (never classified,
+     * page hints ignored) and returned in {@code pageResults} with its fixed fields, without merging the pages.
+     * It is also {@code simpleOutput}: the fields of the response carry only {@code value} (no {@code
+     * confidence}/{@code page}).
+     */
+    @Test
+    void process_perPageProfile_returnsEachPageWithoutMerging() throws IOException {
+        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
+        when(extractor.extract(any(byte[].class), anyInt(), eq(3), any())).thenAnswer(invocation -> {
+            int page = invocation.getArgument(1);
+            if (page == 3) {
+                throw new VisionFieldExtractor.PageExtractionException("bad", null);
+            }
+            return new PageExtraction(page, null, civilStatusFields(page, page == 2), Map.of(),
+                    page == 2 ? List.of("faint mark") : List.of());
+        });
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), CIVIL_STATUS_CONTEXT);
+
+        assertThat(job.status()).isEqualTo(ExtractionStatus.SUCCEEDED);
+        ExtractionResponse result = job.result();
+        assertThat(result.fields()).isNull();
+        assertThat(result.collections()).isNull();
+        assertThat(result.pages()).isNull();
+        assertThat(result.pageResults()).containsExactly(
+                new PageResult(1, null, simplifiedCivilStatusFields(false), null),
+                new PageResult(2, null, simplifiedCivilStatusFields(true), null));
+        assertThat(result.warnings()).containsExactly(
+                "'pageHints' ignored: profile 'gaime-civil-status' extracts each page on its own",
+                "Page 3 could not be analysed by the extraction service",
+                "Page 2: faint mark");
+        verify(extractor, times(3)).extract(any(byte[].class), anyInt(), eq(3), any());
+        verifyNoInteractions(classifier);
     }
 }
