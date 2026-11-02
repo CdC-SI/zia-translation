@@ -83,8 +83,11 @@ class VisionFieldExtractorHttpTest {
         assertThat(jsonSchema.get("strict").asBoolean()).isTrue();
         assertThat(jsonSchema.get("schema").get("properties").get("fields").get("properties").has("invoice.date"))
                 .isTrue();
+        assertThat(jsonSchema.get("schema").get("properties").get("fields").get("properties").get("invoice.date")
+                .get("properties").has("page")).isTrue();
         assertThat(page.fields().get("invoice.date").value()).isEqualTo("2024-03-12");
         assertThat(page.fields().get("invoice.date").confidence()).isEqualTo(0.9);
+        assertThat(page.fields().get("invoice.date").page()).isEqualTo(1);
     }
 
     @Test

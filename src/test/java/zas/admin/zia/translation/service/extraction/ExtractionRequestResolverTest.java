@@ -50,6 +50,16 @@ class ExtractionRequestResolverTest {
     }
 
     @Test
+    void withProfile_emptyMissingFields_defaultsToEveryFieldAndCollectionOfTheProfile() {
+        ExtractionRequest request = resolver.resolve(new ExtractionContext("sumex-invoice", "D_1", "de",
+                Map.of(), List.of(), null));
+
+        assertThat(request.fields()).extracting(FieldDefinition::key).contains("biller.gln");
+        assertThat(request.collections()).extracting(CollectionDefinition::key).contains("services");
+        assertThat(request.warnings()).isEmpty();
+    }
+
+    @Test
     void invalidContexts_areRejected() {
         assertInvalid(null, "Part 'context' is missing.");
         assertInvalid(new ExtractionContext(null, null, null, null, null, null), "at least one key");

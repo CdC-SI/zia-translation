@@ -142,7 +142,8 @@ public class ExtractionProfileRegistry {
                     document.pageClassification().instructions());
         }
         return new ExtractionProfile(document.id(), document.description(), document.instructions(), fields,
-                collections, pageClassification);
+                collections, pageClassification, Boolean.TRUE.equals(document.perPage()),
+                Boolean.TRUE.equals(document.simpleOutput()));
     }
 
     private static void addField(Map<String, FieldDefinition> fields, Set<String> keys, FieldDefinition field) {
@@ -161,7 +162,13 @@ public class ExtractionProfileRegistry {
         if (type == FieldType.ENUM && values.isEmpty()) {
             throw new IllegalArgumentException("ENUM field '%s' has no 'values'".formatted(key));
         }
-        return new FieldDefinition(key, type, field.description(), values);
+        boolean nullable = !Boolean.FALSE.equals(field.nullable());
+        // without null, only an ENUM leaves the model a truthful answer (e.g. UNCLEAR); a free value would be invented
+        if (!nullable && type != FieldType.ENUM) {
+            throw new IllegalArgumentException(
+                    "field '%s': 'nullable: false' is only allowed for ENUM fields".formatted(key));
+        }
+        return new FieldDefinition(key, type, field.description(), values, nullable);
     }
 
     static boolean isValidKey(String key) {
@@ -174,7 +181,7 @@ public class ExtractionProfileRegistry {
 
     record ProfileDocument(String id, String description, String instructions, List<FieldGroupDocument> fieldGroups,
                            List<FieldDocument> fields, List<CollectionDocument> collections,
-                           PageClassificationDocument pageClassification) {
+                           PageClassificationDocument pageClassification, Boolean perPage, Boolean simpleOutput) {
     }
 
     record PageClassificationDocument(String mainDocument, String instructions) {
@@ -183,7 +190,8 @@ public class ExtractionProfileRegistry {
     record FieldGroupDocument(List<String> prefixes, List<FieldDocument> fields) {
     }
 
-    record FieldDocument(String key, String name, FieldType type, String description, List<String> values) {
+    record FieldDocument(String key, String name, FieldType type, String description, List<String> values,
+                        Boolean nullable) {
     }
 
     record CollectionDocument(String key, String description, List<FieldDocument> fields) {

@@ -7,7 +7,8 @@ import java.util.*;
  *
  * @param profile       optional id of a server-side {@link ExtractionProfile}
  * @param knownFields   values already known by the client, given to the model as hints
- * @param missingFields keys of the values (and collections) to extract
+ * @param missingFields keys of the values (and collections) to extract; may be left empty when a {@code profile}
+ *                       is given, in which case every field and collection of the profile is requested
  * @param instructions  optional additional instructions for the model
  * @param pageHints     classification of pages already known by the client, to be confirmed or completed
  */

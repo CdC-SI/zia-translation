@@ -144,13 +144,26 @@ class VisionFieldExtractorTest {
     }
 
     @Test
-    void systemPrompt_readsOnlyCheckedPositions() {
-        assertThat(VisionFieldExtractor.SYSTEM_PROMPT)
-                .contains("only the items that are checked")
-                .contains("never return an item that is only printed")
-                .contains("Never report the page numbering of the file")
-                .doesNotContain("909")
-                .doesNotContain("tariff");
+    void systemPrompt_detailed_describesEvidenceConfidenceAndPage() {
+        assertThat(VisionFieldExtractor.systemPrompt(false))
+                .contains("Never guess, infer or invent a value")
+                .contains("\"evidence\"", "\"confidence\"", "\"page\"", "\"documentType\"", "\"warnings\"")
+                .contains("Never report the page numbering of the file");
+    }
+
+    @Test
+    void systemPrompt_simple_asksOnlyForTheValues() {
+        assertThat(VisionFieldExtractor.systemPrompt(true))
+                .contains("Never guess, infer or invent a value")
+                .contains("without evidence or comment")
+                .doesNotContain("\"evidence\"", "\"confidence\"", "\"documentType\"", "\"warnings\"");
+    }
+
+    @Test
+    void systemPrompt_containsNoDocumentSpecificRule() {
+        assertThat(List.of(VisionFieldExtractor.systemPrompt(false), VisionFieldExtractor.systemPrompt(true)))
+                .allSatisfy(prompt -> assertThat(prompt)
+                        .doesNotContain("check box", "909", "tariff", "Rechnungsdatum", "medical_invoice"));
     }
 
     @Test
@@ -175,6 +188,56 @@ class VisionFieldExtractorTest {
         Map<String, ExtractedField> row = extraction.collections().get("services").getFirst();
         assertThat(row.get("code").page()).isEqualTo(1);
         assertThat(row.get("amount").page()).isEqualTo(2);
+    }
+
+    @Test
+    void parse_requiredFieldMissing_usesFallbackWhenEnumProvidesUncertainty() {
+        FieldDefinition required = new FieldDefinition("civil_status_detected", FieldType.ENUM, "Attestation?",
+                List.of("true", "false", "UNCLEAR"), false);
+        ExtractionRequest request = new ExtractionRequest("gaime-civil-status", null, null, null, Map.of(), null,
+                List.of(required), List.of(), List.of());
+        String answer = """
+                {"fields": {"civil_status_detected": {"value": null, "evidence": null, "confidence": 0}}}""";
+
+        PageExtraction page = extractor.parse(answer, 1, request);
+
+        assertThat(page.fields()).containsOnlyKeys("civil_status_detected");
+        assertThat(page.fields().get("civil_status_detected")).isEqualTo(new ExtractedField("UNCLEAR", 0.0, 1, null));
+        assertThat(page.warnings()).containsExactly("Required value of 'civil_status_detected' missing on page 1");
+    }
+
+    @Test
+    void parse_requiredFieldMissing_withoutUncertaintyValue_isDroppedWithWarning() {
+        FieldDefinition required = new FieldDefinition("civil_status_detected", FieldType.ENUM, "Attestation?",
+                List.of("true", "false"), false);
+        ExtractionRequest request = new ExtractionRequest("gaime-civil-status", null, null, null, Map.of(), null,
+                List.of(required), List.of(), List.of());
+        String answer = """
+                {"fields": {"civil_status_detected": {"value": null, "evidence": null, "confidence": 0}}}""";
+
+        PageExtraction page = extractor.parse(answer, 1, request);
+
+        assertThat(page.fields()).isEmpty();
+        assertThat(page.warnings()).containsExactly("Required value of 'civil_status_detected' missing on page 1");
+    }
+
+    @Test
+    void parse_simpleAnswer_readsBareValues_andFlagsMissingRequiredOnes() {
+        FieldDefinition civilStatus = new FieldDefinition("civil_status_detected", FieldType.ENUM, "Attestation?",
+                List.of("true", "false", "UNCLEAR"), false);
+        FieldDefinition signed = new FieldDefinition("signature_present", FieldType.ENUM, "Signed?",
+                List.of("true", "false", "UNCLEAR"), false);
+        ExtractionRequest request = new ExtractionRequest("gaime-civil-status", null, null, null, Map.of(), null,
+                List.of(civilStatus, signed), List.of(), List.of(), List.of(), null, true, true);
+        String answer = """
+                {"fields": {"civil_status_detected": "true", "signature_present": null}}""";
+
+        PageExtraction page = extractor.parse(answer, 1, request);
+
+        assertThat(page.fields()).containsOnlyKeys("civil_status_detected", "signature_present");
+        assertThat(page.fields().get("civil_status_detected").value()).isEqualTo("true");
+        assertThat(page.fields().get("signature_present")).isEqualTo(new ExtractedField("UNCLEAR", 0.0, 1, null));
+        assertThat(page.warnings()).containsExactly("Required value of 'signature_present' missing on page 1");
     }
 
     @Test

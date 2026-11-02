@@ -294,6 +294,15 @@ paths:
         (at most `zia.extraction.max-images-per-call` images per call), unclassified pages being treated as pages of
         the main document; without main document, all the pages except `OTHER` ones are analysed. The classification
         of the pages is returned in `result.pages`.
+        A `perPage` profile (e.g. `gaime-civil-status`) never classifies its pages (`pageHints` are ignored with a
+        warning): each page is extracted on its own and returned in `result.pageResults`, one entry per analysed
+        page, without merging the pages (`result.fields` and `result.collections` are then absent). The profile
+        `gaime-civil-status` reads a civil-status attestation (7 checkboxes): every page gets the same fixed keys
+        (`civil_status_detected`: whether the page is the attestation, `signature_present`, and the state of each of the 7 boxes
+        `box_*`), all declared non-nullable (the model must commit to a value instead of answering `null`; a
+        value it still can't produce is reported as a warning instead of being silently omitted). The service does
+        not resolve them into a single civil status: the caller does. `context.missingFields` may be omitted for
+        this profile: every one of its 9 keys is then requested.
         Idempotent on `Idempotency-Key`: a known key returns the existing job. Jobs are kept `zia.extraction.job-ttl`
         (default 24h) after their completion.
       parameters:
@@ -534,11 +543,12 @@ components:
 
     ExtractionContext:
       type: object
-      required: [missingFields]
       properties:
         profile:
           type: string
-          description: Id of a server-side extraction profile (e.g. `sumex-invoice`); ad hoc extraction when absent
+          description: >
+            Id of a server-side extraction profile (e.g. `sumex-invoice`, `gaime-civil-status`); ad hoc extraction
+            when absent
         documentId:
           type: string
         language:
@@ -551,12 +561,12 @@ components:
             type: string
         missingFields:
           type: array
-          minItems: 1
           maxItems: 80
           description: >
             Keys to extract. With a profile: keys of its fields and collections (e.g. `biller.gln`, `services`),
-            unknown keys being ignored with a warning. Without profile: free keys matching
-            `[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}`, extracted as text.
+            unknown keys being ignored with a warning; may be omitted/empty, in which case every field and
+            collection of the profile is requested. Without profile: free keys matching
+            `[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}`, extracted as text; at least one key is then required.
           items:
             type: string
         instructions:
@@ -683,6 +693,45 @@ components:
           type: array
           items:
             type: string
+        pageResults:
+          type: array
+          description: >
+            `perPage` profiles only: values of each analysed page, in page order, without merging the pages. A page
+            that could not be analysed is absent (with a warning).
+          items:
+            $ref: '#/components/schemas/PageResult'
+
+    PageResult:
+      type: object
+      required: [page]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: 1-based page of the file
+        documentType:
+          type: string
+          description: Free classification of the page (informative)
+        fields:
+          type: object
+          description: Values found on the page, by key; a key that was not found is absent
+          additionalProperties:
+            $ref: '#/components/schemas/ExtractedField'
+        collections:
+          type: object
+          description: Rows found on the page for each requested collection
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/ExtractedField'
+      example:
+        page: 2
+        fields:
+          civil_status_detected: {value: 'true'}
+          signature_present: {value: 'true'}
+          box_widowed: {value: MARKED}
 
     FieldDefinition:
       type: object
