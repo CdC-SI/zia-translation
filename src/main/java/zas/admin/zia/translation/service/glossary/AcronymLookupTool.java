@@ -72,10 +72,16 @@ public class AcronymLookupTool {
                 .map(acronym -> lookup(acronym, source, targetLanguage))
                 .toList();
 
-        log.info("lookup_acronyms (source '{}', target '{}'{}): found {}, not found {}", source, targetLanguage,
-                source.equals(targetLanguage) ? ", same language" : "",
-                results.stream().filter(AcronymLookupResult::found).map(AcronymLookupResult::acronym).toList(),
-                results.stream().filter(r -> !r.found()).map(AcronymLookupResult::acronym).toList());
+        // The acronyms are fragments of the submitted text: INFO logs counts only, the values go to DEBUG (off by
+        // default), for an operator who enables it on purpose.
+        long found = results.stream().filter(AcronymLookupResult::found).count();
+        log.info("lookup_acronyms (source '{}', target '{}'{}): {} found, {} not found", source, targetLanguage,
+                source.equals(targetLanguage) ? ", same language" : "", found, results.size() - found);
+        if (log.isDebugEnabled()) {
+            log.debug("lookup_acronyms found {}, not found {}",
+                    results.stream().filter(AcronymLookupResult::found).map(AcronymLookupResult::acronym).toList(),
+                    results.stream().filter(r -> !r.found()).map(AcronymLookupResult::acronym).toList());
+        }
         return results;
     }
 

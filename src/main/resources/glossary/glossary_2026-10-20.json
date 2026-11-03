@@ -18293,7 +18293,7 @@
           "full_name": "Ordonnance du 15 janvier 1971 sur les prestations complémentaires à l'assurance-vieillesse, survivants et invalidité",
           "definition": null,
           "detect": [
-            "OPC-AVS/AI"
+            "OPC-AVS/AI", "OPC-AVS"
           ],
           "detect_full_names": [
             "Ordonnance du 15 janvier 1971 sur les prestations complémentaires à l'assurance-vieillesse, survivants et invalidité"

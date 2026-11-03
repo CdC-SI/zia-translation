@@ -8,12 +8,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import reactor.test.StepVerifier;
 import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -21,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiClientConfigurationTest {
 
@@ -40,10 +43,24 @@ class AiClientConfigurationTest {
              "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}
             """;
 
+    /** The answer the server gives when the max-tokens cap is reached: no error, only the finish reason. */
+    private static final String TRUNCATED_RESPONSE = """
+            {"id":"chatcmpl-1","object":"chat.completion","created":1,"model":"test-model",
+             "choices":[{"index":0,"message":{"role":"assistant","content":"bonj"},"finish_reason":"length"}],
+             "usage":{"prompt_tokens":1,"completion_tokens":8192,"total_tokens":8193}}
+            """;
+
+    private static final String STREAM_CHUNK = """
+            data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"test-model",\
+            "choices":[{"index":0,"delta":{"role":"assistant","content":"%s"},"finish_reason":%s}]}
+
+            """;
+
     private final AtomicReference<String> requestPath = new AtomicReference<>();
     private final AtomicReference<String> authorizationHeader = new AtomicReference<>();
     private final List<String> requestBodies = new CopyOnWriteArrayList<>();
     private final AtomicReference<IntFunction<String>> responder = new AtomicReference<>(n -> COMPLETION_RESPONSE);
+    private final AtomicReference<String> contentType = new AtomicReference<>("application/json");
     private HttpServer server;
 
     @BeforeEach
@@ -54,7 +71,7 @@ class AiClientConfigurationTest {
             authorizationHeader.set(exchange.getRequestHeaders().getFirst("Authorization"));
             requestBodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             byte[] body = responder.get().apply(requestBodies.size()).getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.getResponseHeaders().add("Content-Type", contentType.get());
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(body);
@@ -105,6 +122,45 @@ class AiClientConfigurationTest {
         assertThat(content).isEqualTo("bonjour");
         assertThat(tool.executions.get()).isEqualTo(2);
         assertThat(requestBodies.getLast()).contains("limit");
+    }
+
+    @Test
+    void answerCutByMaxTokensCapFails() {
+        responder.set(n -> TRUNCATED_RESPONSE);
+        ChatClient client = new AiClientConfiguration()
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+
+        assertThatThrownBy(() -> client.prompt().user("hello").call().content())
+                .isInstanceOf(IncompleteGenerationException.class);
+    }
+
+    @Test
+    void streamedAnswerCutByMaxTokensCapEndsWithError() {
+        contentType.set("text/event-stream");
+        responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("j", "\"length\"")
+                + "data: [DONE]\n\n");
+        ChatClient client = new AiClientConfiguration()
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+
+        StepVerifier.create(client.prompt().user("hello").stream().content())
+                .expectNext("bon")
+                .thenConsumeWhile(token -> true)
+                .expectError(IncompleteGenerationException.class)
+                .verify(Duration.ofSeconds(10));
+    }
+
+    @Test
+    void completeStreamedAnswerSucceeds() {
+        contentType.set("text/event-stream");
+        responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("jour", "\"stop\"")
+                + "data: [DONE]\n\n");
+        ChatClient client = new AiClientConfiguration()
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+
+        String content = String.join("", client.prompt().user("hello").stream().content().collectList()
+                .block(Duration.ofSeconds(10)));
+
+        assertThat(content).isEqualTo("bonjour");
     }
 
     @Test

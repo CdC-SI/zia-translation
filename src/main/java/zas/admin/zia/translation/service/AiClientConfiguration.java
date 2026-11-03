@@ -48,7 +48,7 @@ class AiClientConfiguration {
                 .apiKey(apiKey)
                 .model(model)
                 // Reasoning and answer together: stops a generation that loops instead of running to the
-                // context limit (a page needs ~1,000 tokens).
+                // context limit (a page needs ~1,000 tokens). A capped answer fails in FinishReasonAdvisor.
                 .maxTokens(maxTokens)
                 .build();
         OpenAiChatModel chatModel = OpenAiChatModel.builder()
@@ -58,6 +58,7 @@ class AiClientConfiguration {
         // ChatClient runs the tools itself, in its ToolCallingAdvisor: the manager must be given there, not to the model.
         return ChatClient.builder(chatModel, observationRegistry, null, null,
                         ToolCallingAdvisor.builder().toolCallingManager(toolCallingManager(maxToolCalls, observationRegistry)))
+                .defaultAdvisors(new FinishReasonAdvisor())
                 .build();
     }
 
