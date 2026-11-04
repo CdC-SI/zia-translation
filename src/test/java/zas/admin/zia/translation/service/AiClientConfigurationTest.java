@@ -88,7 +88,7 @@ class AiClientConfigurationTest {
     @Test
     void chatClientCallsOpenAiCompatibleEndpointUnderV1() {
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
         String content = client.prompt().user("hello").call().content();
 
@@ -101,7 +101,7 @@ class AiClientConfigurationTest {
     @Test
     void requestsCarryTheMaxTokensCap() {
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
         client.prompt().user("hello").call().content();
 
@@ -110,25 +110,47 @@ class AiClientConfigurationTest {
 
     @Test
     void acronymLookupsAreCappedPerRequest() {
-        // The fake model asks for the tool 5 times, then answers. Only the first 2 calls may run; the others
-        // must get the limit message as their tool result, without failing the request.
-        responder.set(n -> n <= 5 ? TOOL_CALL_RESPONSE.formatted(n) : COMPLETION_RESPONSE);
+        // The fake model asks for the tool on every turn, like the loop seen on 04.11. Only the first 2 calls may
+        // run; the 3rd ends the request instead of looping until the context is full.
+        responder.set(n -> TOOL_CALL_RESPONSE.formatted(n));
         CountingLookupTool tool = new CountingLookupTool();
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
-        String content = client.prompt().user("Les AFam sont versées.").tools(tool).call().content();
-
-        assertThat(content).isEqualTo("bonjour");
+        assertThatThrownBy(() -> client.prompt().user("Les AFam sont versées.").tools(tool).call().content())
+                .isInstanceOf(ToolCallLimitReachedException.class);
         assertThat(tool.executions.get()).isEqualTo(2);
-        assertThat(requestBodies.getLast()).contains("limit");
+        assertThat(requestBodies).hasSize(3);
+    }
+
+    @Test
+    void streamedAcronymLookupsAreCappedPerRequest() {
+        contentType.set("text/event-stream");
+        responder.set(n -> """
+                data: {"id":"chatcmpl-%1$d","object":"chat.completion.chunk","created":1,"model":"test-model",\
+                "choices":[{"index":0,"delta":{"role":"assistant","content":null,"tool_calls":[{"index":0,\
+                "id":"call_%1$d","type":"function","function":{"name":"lookup_acronyms",\
+                "arguments":"{\\"acronyms\\":[\\"AFam\\"],\\"sourceLanguage\\":\\"FR\\"}"}}]},"finish_reason":"tool_calls"}]}
+
+                data: [DONE]
+
+                """.formatted(n));
+        CountingLookupTool tool = new CountingLookupTool();
+        ChatClient client = new AiClientConfiguration()
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+
+        StepVerifier.create(client.prompt().user("Les AFam sont versées.").tools(tool).stream().content())
+                .thenConsumeWhile(token -> true)
+                .expectError(ToolCallLimitReachedException.class)
+                .verify(Duration.ofSeconds(10));
+        assertThat(tool.executions.get()).isEqualTo(2);
     }
 
     @Test
     void answerCutByMaxTokensCapFails() {
         responder.set(n -> TRUNCATED_RESPONSE);
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
         assertThatThrownBy(() -> client.prompt().user("hello").call().content())
                 .isInstanceOf(IncompleteGenerationException.class);
@@ -140,7 +162,7 @@ class AiClientConfigurationTest {
         responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("j", "\"length\"")
                 + "data: [DONE]\n\n");
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
         StepVerifier.create(client.prompt().user("hello").stream().content())
                 .expectNext("bon")
@@ -155,12 +177,21 @@ class AiClientConfigurationTest {
         responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("jour", "\"stop\"")
                 + "data: [DONE]\n\n");
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
 
         String content = String.join("", client.prompt().user("hello").stream().content().collectList()
                 .block(Duration.ofSeconds(10)));
 
         assertThat(content).isEqualTo("bonjour");
+    }
+
+    @Test
+    void promptSizeLoggingAdvisorIsAddedOnlyWhenEnabled() {
+        assertThat(AiClientConfiguration.advisors(false))
+                .noneMatch(PromptSizeLoggingAdvisor.class::isInstance)
+                .anyMatch(ToolCallLimitAdvisor.class::isInstance)
+                .anyMatch(FinishReasonAdvisor.class::isInstance);
+        assertThat(AiClientConfiguration.advisors(true)).anyMatch(PromptSizeLoggingAdvisor.class::isInstance);
     }
 
     @Test

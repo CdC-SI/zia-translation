@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
-import org.springframework.ai.tool.execution.DefaultToolCallResultConverter;
 import org.springframework.ai.tool.execution.DefaultToolExecutionExceptionProcessor;
 import org.springframework.ai.tool.execution.ToolExecutionException;
 import org.springframework.core.io.ClassPathResource;
@@ -15,9 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.util.List;
 import java.util.Map;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 
 class AcronymLookupToolTest {
 
@@ -119,9 +116,8 @@ class AcronymLookupToolTest {
 
     @Test
     void lookupAcronyms_resultIsSentToTheModelAsJson() {
-        // Spring AI converts the returned list with this converter before sending it back to the model.
-        String json = new DefaultToolCallResultConverter()
-                .convert(tool.lookupAcronyms(List.of("BSV"), SourceLanguage.DE, context("fr")), List.class);
+        // Same path as a real tool call: the callback converts the returned list with AcronymLookupResultConverter.
+        String json = lookupCallback().call("{\"acronyms\": [\"BSV\"], \"sourceLanguage\": \"DE\"}", context("fr"));
 
         assertThat(json)
                 .contains("\"acronym\":\"BSV\"")
@@ -132,9 +128,17 @@ class AcronymLookupToolTest {
     }
 
     @Test
+    void lookupAcronyms_resultTellsTheModelToTranslateWithoutCallingAgain() {
+        String json = lookupCallback().call("{\"acronyms\": [\"AHV\"], \"sourceLanguage\": \"DE\"}", context("fr"));
+
+        assertThat(json)
+                .startsWith("{\"results\":[")
+                .contains("\"nextStep\":\"" + AcronymLookupResultConverter.NEXT_STEP + "\"");
+    }
+
+    @Test
     void lookupAcronyms_sameLanguageNoteIsSentToTheModel() {
-        String json = new DefaultToolCallResultConverter()
-                .convert(tool.lookupAcronyms(List.of("XYZ"), SourceLanguage.FR, context("fr")), List.class);
+        String json = lookupCallback().call("{\"acronyms\": [\"XYZ\"], \"sourceLanguage\": \"FR\"}", context("fr"));
 
         assertThat(json).contains("\"note\":\"The text is already in the target language");
     }

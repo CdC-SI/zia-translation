@@ -9,10 +9,12 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
+import org.springframework.ai.model.tool.ToolCallLimitExceededException;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.util.MimeTypeUtils;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import zas.admin.zia.translation.service.ToolCallLimitReachedException;
 import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.language.TargetLanguage;
@@ -22,12 +24,9 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.RETURNS_SELF;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class TextTranslationServiceTest {
@@ -495,6 +494,60 @@ class TextTranslationServiceTest {
         verify(requestSpec, never()).tools(any());
         verify(requestSpec, never()).toolContext(any());
         assertThat(promptCaptor.getValue()).doesNotContain("lookup_acronyms");
+    }
+
+    @Test
+    void translateText_toolLimitExceeded_translatesAgainWithoutTheTool() {
+        ChatClient.ChatClientRequestSpec withToolSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(withToolSpec.call()).thenThrow(toolLimitExceeded());
+        ChatClient.ChatClientRequestSpec withoutToolSpec = selfReturningCallSpec("Die AHV");
+        when(llmClient.prompt()).thenReturn(withToolSpec, withoutToolSpec);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        String result = withTool().translateText("L'AVS", TargetLanguage.DE);
+
+        assertThat(result).isEqualTo("Die AHV");
+        verify(withToolSpec).tools(acronymLookupTool);
+        verify(withoutToolSpec, never()).tools(any());
+        verify(withoutToolSpec, never()).toolContext(any());
+        verify(withoutToolSpec).user(promptCaptor.capture());
+        assertThat(promptCaptor.getValue()).doesNotContain("lookup_acronyms").endsWith("L'AVS\n");
+    }
+
+    @Test
+    void translateText_otherFailure_isNotRetried() {
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class, RETURNS_SELF);
+        when(requestSpec.call()).thenThrow(new IllegalStateException("server down"));
+        when(llmClient.prompt()).thenReturn(requestSpec);
+
+        assertThatThrownBy(() -> withTool().translateText("L'AVS", TargetLanguage.DE))
+                .isInstanceOf(IllegalStateException.class);
+        verify(llmClient).prompt();
+    }
+
+    @Test
+    void translatePageStream_toolLimitExceeded_streamsATranslationWithoutTheTool() {
+        ChatClient.ChatClientRequestSpec withToolSpec = selfReturningStreamSpec(Flux.error(toolLimitExceeded()));
+        ChatClient.ChatClientRequestSpec withoutToolSpec = selfReturningStreamSpec(Flux.just("Bon", "jour"));
+        when(llmClient.prompt()).thenReturn(withToolSpec, withoutToolSpec);
+
+        StepVerifier.create(withTool().translatePageStream("Guten Tag", TargetLanguage.FR))
+                .expectNext("Bon", "jour")
+                .verifyComplete();
+
+        verify(withoutToolSpec, never()).tools(any());
+    }
+
+    @Test
+    void isToolCallLimitExceeded_looksThroughWrappingExceptions() {
+        assertThat(TextTranslationService.isToolCallLimitExceeded(new RuntimeException(toolLimitExceeded()))).isTrue();
+        assertThat(TextTranslationService.isToolCallLimitExceeded(
+                new ToolCallLimitExceededException(AcronymLookupTool.TOOL_NAME, 2, null))).isTrue();
+        assertThat(TextTranslationService.isToolCallLimitExceeded(new RuntimeException("other"))).isFalse();
+    }
+
+    private static ToolCallLimitReachedException toolLimitExceeded() {
+        return new ToolCallLimitReachedException("cap reached");
     }
 
     private TextTranslationService withTool() {

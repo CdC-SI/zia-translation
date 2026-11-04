@@ -1,9 +1,5 @@
 package zas.admin.zia.translation.service.glossary;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
-
 import com.fasterxml.jackson.annotation.JsonInclude;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,10 +9,14 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+
 /**
  * The function the model can call during a translation. Spring AI turns the {@link Tool} method below into a
  * JSON Schema sent with every request, runs it when the model answers with a tool call, and sends the
- * returned list back to the model as JSON.
+ * returned list back to the model as JSON, with the next step to take (see {@link AcronymLookupResultConverter}).
  */
 @Component
 @ConditionalOnProperty(name = "zia.translation.glossary.tool-enabled", havingValue = "true")
@@ -44,12 +44,13 @@ public class AcronymLookupTool {
         this.glossary = glossary;
     }
 
-    @Tool(name = TOOL_NAME, description = """
+    @Tool(name = TOOL_NAME, resultConverter = AcronymLookupResultConverter.class, description = """
         Looks up acronyms in the official glossary of Swiss social insurance terms.
         For each acronym, returns the official forms to write in the target language (targetForms), \
         the official full names and a short definition. When an acronym has several candidates, \
         choose the one that fits the context; if none fits, the acronym has another meaning in this text. \
-        Call it once with every acronym of the source text, and give the language of the source text. \
+        Call it at most once per text, with all the acronyms of the source text together, and give the language \
+        of the source text. Its result is final: never call it again after you have received it. \
         Only call it if the source text is in German, French, Italian or English.""")
     public List<AcronymLookupResult> lookupAcronyms(
             @ToolParam(description = "One item per acronym, copied letter by letter as written in the source text. "

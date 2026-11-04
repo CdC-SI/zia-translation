@@ -1,11 +1,15 @@
 package zas.admin.zia.translation.service.llm;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
+import org.springframework.ai.model.tool.ToolCallLimitExceededException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import zas.admin.zia.translation.service.ToolCallLimitReachedException;
 import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.language.TargetLanguage;
@@ -66,11 +70,14 @@ public class TextTranslationService {
     // Added to the prompt only when the acronym lookup tool is offered (see withToolInstruction).
     private static final String ACRONYM_TOOL_INSTRUCTION =
             """
-            Acronyms: before translating, call the lookup_acronyms tool once with every acronym of the source text and the language of the source text. Web and e-mail addresses are not acronyms. Currency codes, units and article numbers are not acronyms.
+            Acronyms: you may call the lookup_acronyms tool ONCE, before translating, with all the acronyms of the source text together and the language of the source text. Web and e-mail addresses are not acronyms. Currency codes, units and article numbers are not acronyms. If the source text has no acronym, do not call the tool.
+            - The tool result is final. Once you have it, do not call lookup_acronyms again (not with the same acronyms, not with other acronyms, not with another language): write the translation right away.
             - If the tool finds an acronym and one candidate's full name or definition matches its meaning in this text, write one of that candidate's targetForms at every occurrence of the acronym, also inside compound words.
             - If no candidate matches its meaning in this text, the acronym means something else here: translate it as you normally would.
-            - If the tool does not find an acronym, translate it as you normally would
+            - If the tool does not find an acronym, translate it as you normally would.
             """;
+
+    private static final Logger log = LoggerFactory.getLogger(TextTranslationService.class);
 
     private final ChatClient llmClient;
     private final ChatClient visionClient;
@@ -101,10 +108,7 @@ public class TextTranslationService {
         Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         List<String> translated = new ArrayList<>(extractedPages.size());
         for (String pageText : extractedPages) {
-            String prompt = withToolInstruction(buildPrompt(template, targetLanguage, pageText), toolLanguage);
-            String result = withAcronymTool(llmClient.prompt().user(prompt), toolLanguage)
-                    .call()
-                    .content();
+            String result = call(llmClient, buildPrompt(template, targetLanguage, pageText), null, toolLanguage);
             translated.add(result != null ? result : "");
         }
         return translated;
@@ -119,15 +123,8 @@ public class TextTranslationService {
         Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         List<String> translated = new ArrayList<>(pageImages.size());
         for (byte[] imageBytes : pageImages) {
-            String prompt = withToolInstruction(buildPrompt(promptTemplate, targetLanguage, ""), toolLanguage);
             Media media = imagePreprocessor.toMedia(imageBytes);
-            UserMessage message = UserMessage.builder()
-                    .text(prompt)
-                    .media(media)
-                    .build();
-            String result = withAcronymTool(visionClient.prompt().messages(message), toolLanguage)
-                    .call()
-                    .content();
+            String result = call(visionClient, buildPrompt(promptTemplate, targetLanguage, ""), media, toolLanguage);
             translated.add(result != null ? result : "");
         }
         return translated;
@@ -137,11 +134,8 @@ public class TextTranslationService {
      * Translates a single plain text in one blocking (non-streamed) LLM call.
      */
     public String translateText(String text, TargetLanguage targetLanguage) {
-        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
-        String prompt = withToolInstruction(buildPrompt(TRANSLATE_PLAIN_PROMPT_TEMPLATE, targetLanguage, text), toolLanguage);
-        String result = withAcronymTool(llmClient.prompt().user(prompt), toolLanguage)
-                .call()
-                .content();
+        String result = call(llmClient, buildPrompt(TRANSLATE_PLAIN_PROMPT_TEMPLATE, targetLanguage, text), null,
+                acronymToolLanguage(targetLanguage));
         return result != null ? result : "";
     }
 
@@ -149,27 +143,77 @@ public class TextTranslationService {
      * Streams the translation of a single text page token-by-token.
      */
     public Flux<String> translatePageStream(String extractedText, TargetLanguage targetLanguage) {
-        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
-        String prompt = withToolInstruction(buildPrompt(TRANSLATE_PLAIN_PROMPT_TEMPLATE, targetLanguage, extractedText), toolLanguage);
-        return withAcronymTool(llmClient.prompt().user(prompt), toolLanguage)
-                .stream()
-                .content();
+        return stream(llmClient, buildPrompt(TRANSLATE_PLAIN_PROMPT_TEMPLATE, targetLanguage, extractedText), null,
+                acronymToolLanguage(targetLanguage));
     }
 
     /**
      * Streams the translation of a single image page (single strategy) token-by-token.
      */
     public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, TargetLanguage targetLanguage) {
-        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
-        String prompt = withToolInstruction(buildPrompt(SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE, targetLanguage, ""), toolLanguage);
         Media media = imagePreprocessor.toMedia(imageBytes);
+        return stream(visionClient, buildPrompt(SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE, targetLanguage, ""), media,
+                acronymToolLanguage(targetLanguage));
+    }
+
+    /**
+     * One translation call, with the acronym tool when enabled. When the model goes over the lookup cap (it keeps
+     * calling the tool instead of translating), the translation is made again once, without the tool.
+     */
+    private String call(ChatClient client, String prompt, Media media, Optional<String> toolLanguage) {
+        if (toolLanguage.isEmpty()) {
+            return request(client, prompt, media).call().content();
+        }
+        try {
+            return withAcronymTool(request(client, withToolInstruction(prompt, toolLanguage), media), toolLanguage)
+                    .call()
+                    .content();
+        } catch (RuntimeException exception) {
+            if (!isToolCallLimitExceeded(exception)) {
+                throw exception;
+            }
+            logToolLimitFallback(exception);
+            return request(client, prompt, media).call().content();
+        }
+    }
+
+    /** Streaming counterpart of {@link #call}: the tool rounds stream no token, so the fallback starts clean. */
+    private Flux<String> stream(ChatClient client, String prompt, Media media, Optional<String> toolLanguage) {
+        if (toolLanguage.isEmpty()) {
+            return request(client, prompt, media).stream().content();
+        }
+        return withAcronymTool(request(client, withToolInstruction(prompt, toolLanguage), media), toolLanguage)
+                .stream()
+                .content()
+                .onErrorResume(TextTranslationService::isToolCallLimitExceeded, exception -> {
+                    logToolLimitFallback(exception);
+                    return request(client, prompt, media).stream().content();
+                });
+    }
+
+    private static ChatClient.ChatClientRequestSpec request(ChatClient client, String prompt, Media media) {
+        if (media == null) {
+            return client.prompt().user(prompt);
+        }
         UserMessage message = UserMessage.builder()
                 .text(prompt)
                 .media(media)
                 .build();
-        return withAcronymTool(visionClient.prompt().messages(message), toolLanguage)
-                .stream()
-                .content();
+        return client.prompt().messages(message);
+    }
+
+    static boolean isToolCallLimitExceeded(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ToolCallLimitReachedException || cause instanceof ToolCallLimitExceededException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void logToolLimitFallback(Throwable exception) {
+        log.warn("The model went over the {} lookup cap ({}): translating again without the tool",
+                AcronymLookupTool.TOOL_NAME, exception.getMessage());
     }
 
     static String buildPrompt(String template, TargetLanguage targetLanguage, String text) {
