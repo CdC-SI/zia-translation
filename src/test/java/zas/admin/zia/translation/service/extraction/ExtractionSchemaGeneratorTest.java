@@ -19,7 +19,7 @@ class ExtractionSchemaGeneratorTest {
 
     @Test
     void generate_listsOnlyRequestedKeys_inStrictObjects() {
-        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN, SEX), List.of(SERVICES), false);
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN, SEX), List.of(SERVICES), false, true);
 
         assertStrict(schema, "documentType", "fields", "collections", "warnings");
         JsonNode fields = schema.get("properties").get("fields");
@@ -41,16 +41,16 @@ class ExtractionSchemaGeneratorTest {
 
     @Test
     void generate_omitsEmptySections() {
-        ObjectNode onlyFields = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(), false);
-        ObjectNode onlyCollections = ExtractionSchemaGenerator.generate(List.of(), List.of(SERVICES), false);
+        ObjectNode onlyFields = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(), false, true);
+        ObjectNode onlyCollections = ExtractionSchemaGenerator.generate(List.of(), List.of(SERVICES), false, true);
 
         assertStrict(onlyFields, "documentType", "fields", "warnings");
         assertStrict(onlyCollections, "documentType", "collections", "warnings");
     }
 
     @Test
-    void generate_detailed_addsPageToEachValue() {
-        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(SERVICES), false);
+    void generate_detailed_addsPageToEachValue_whenSeveralPagesSent() {
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(SERVICES), false, true);
 
         JsonNode gln = schema.get("properties").get("fields").get("properties").get("biller.gln");
         assertStrict(gln, "value", "evidence", "confidence", "page");
@@ -61,11 +61,19 @@ class ExtractionSchemaGeneratorTest {
     }
 
     @Test
+    void generate_detailed_omitsPage_whenOnlyOnePageSent() {
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(GLN), List.of(), false, false);
+
+        JsonNode gln = schema.get("properties").get("fields").get("properties").get("biller.gln");
+        assertStrict(gln, "value", "evidence", "confidence");
+    }
+
+    @Test
     void generate_withNonNullableField_forbidsNullValue() {
         FieldDefinition required = new FieldDefinition("civil_status_detected", FieldType.ENUM, "Attestation?",
                 List.of("true", "false"), false);
 
-        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(required), List.of(), false);
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(required), List.of(), false, true);
 
         JsonNode civilStatus = schema.get("properties").get("fields").get("properties").get("civil_status_detected");
         assertThat(civilStatus.get("properties").get("value").get("type").asString()).isEqualTo("string");
@@ -80,7 +88,7 @@ class ExtractionSchemaGeneratorTest {
         FieldDefinition civilStatus = new FieldDefinition("civil_status_detected", FieldType.ENUM, "Attestation?",
                 List.of("true", "false"), false);
 
-        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(civilStatus), List.of(), true);
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(civilStatus), List.of(), true, false);
 
         assertStrict(schema, "fields");
         JsonNode fields = schema.get("properties").get("fields");
@@ -96,7 +104,7 @@ class ExtractionSchemaGeneratorTest {
     void generate_simple_nullableField_stillBareValue() {
         FieldDefinition name = new FieldDefinition("name", FieldType.STRING, "Name", null);
 
-        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(name), List.of(), true);
+        ObjectNode schema = ExtractionSchemaGenerator.generate(List.of(name), List.of(), true, false);
 
         JsonNode value = schema.get("properties").get("fields").get("properties").get("name");
         assertThat(value.get("type").toString()).isEqualTo("[\"string\",\"null\"]");
