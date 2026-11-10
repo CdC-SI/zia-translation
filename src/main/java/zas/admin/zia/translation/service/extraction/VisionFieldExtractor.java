@@ -131,8 +131,9 @@ class VisionFieldExtractor {
             throw new IllegalArgumentException("No page to extract");
         }
         List<Integer> pages = pageImages.stream().map(PageImage::page).toList();
+        boolean withPage = pages.size() > 1;
         ObjectNode schema = ExtractionSchemaGenerator.generate(request.fields(), request.collections(),
-                request.simpleOutput());
+                request.simpleOutput(), withPage);
         String schemaJson = objectMapper.writeValueAsString(schema);
         List<Media> media = pageImages.stream().map(image -> imagePreprocessor.toMedia(image.image())).toList();
         UserMessage message = UserMessage.builder()

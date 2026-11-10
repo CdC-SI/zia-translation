@@ -13,10 +13,11 @@ import java.util.List;
  * lists all its properties as {@code required} and forbids additional properties. A value that is not found must
  * be {@code null}. No {@code format}/{@code pattern} constraint is used, the values are normalized by the service.
  * <p>
- * By default, each field is {@code {value, evidence, confidence, page}} ({@code page}: the page of the file the value
- * is read on, one of the pages sent in the call), with {@code documentType} and {@code warnings}. With
- * {@code simpleOutput}, each field is a bare value, without {@code documentType}/{@code warnings}, still compliant
- * with strict mode (a non-object property has no {@code required}/{@code additionalProperties} constraint to satisfy).
+ * By default, each field is {@code {value, evidence, confidence[, page]}} ({@code page}: the page of the file the
+ * value is read on, included only when several pages are sent in the call), with {@code documentType} and
+ * {@code warnings}. With {@code simpleOutput}, each field is a bare value, without {@code documentType}/
+ * {@code warnings}, still compliant with strict mode (a non-object property has no {@code required}/
+ * {@code additionalProperties} constraint to satisfy).
  */
 final class ExtractionSchemaGenerator {
 
@@ -35,20 +36,20 @@ final class ExtractionSchemaGenerator {
     }
 
     static ObjectNode generate(List<FieldDefinition> fields, List<CollectionDefinition> collections,
-                               boolean simpleOutput) {
+                               boolean simpleOutput, boolean withPage) {
         ObjectNode properties = NODES.objectNode();
         if (!simpleOutput) {
             properties.set(DOCUMENT_TYPE, nullableString("Kind of document, null if unknown"));
         }
         if (!fields.isEmpty()) {
             ObjectNode fieldProperties = NODES.objectNode();
-            fields.forEach(field -> fieldProperties.set(field.key(), fieldSchema(field, simpleOutput)));
+            fields.forEach(field -> fieldProperties.set(field.key(), fieldSchema(field, simpleOutput, withPage)));
             properties.set(FIELDS, strictObject(fieldProperties));
         }
         if (!collections.isEmpty()) {
             ObjectNode collectionProperties = NODES.objectNode();
             collections.forEach(collection ->
-                    collectionProperties.set(collection.key(), collectionSchema(collection, simpleOutput)));
+                    collectionProperties.set(collection.key(), collectionSchema(collection, simpleOutput, withPage)));
             properties.set(COLLECTIONS, strictObject(collectionProperties));
         }
         if (!simpleOutput) {
@@ -61,9 +62,10 @@ final class ExtractionSchemaGenerator {
         return strictObject(properties);
     }
 
-    private static ObjectNode collectionSchema(CollectionDefinition collection, boolean simpleOutput) {
+    private static ObjectNode collectionSchema(CollectionDefinition collection, boolean simpleOutput,
+                                               boolean withPage) {
         ObjectNode lineProperties = NODES.objectNode();
-        collection.fields().forEach(field -> lineProperties.set(field.key(), fieldSchema(field, simpleOutput)));
+        collection.fields().forEach(field -> lineProperties.set(field.key(), fieldSchema(field, simpleOutput, withPage)));
         ObjectNode schema = NODES.objectNode();
         schema.put("type", "array");
         if (collection.description() != null) {
@@ -87,7 +89,7 @@ final class ExtractionSchemaGenerator {
     }
 
     /** With {@code simpleOutput}, the bare value (no wrapper object): the minimum needed to answer this field. */
-    private static ObjectNode fieldSchema(FieldDefinition field, boolean simpleOutput) {
+    private static ObjectNode fieldSchema(FieldDefinition field, boolean simpleOutput, boolean withPage) {
         if (simpleOutput) {
             return valueSchema(field).put("description", field.schemaDescription());
         }
@@ -98,10 +100,12 @@ final class ExtractionSchemaGenerator {
         confidence.put("type", "number");
         confidence.put("description", "Confidence between 0 and 1");
         properties.set(CONFIDENCE, confidence);
-        ObjectNode page = NODES.objectNode();
-        page.putArray("type").add("integer").add("null");
-        page.put("description", "Page of the file the value is read on, null if not found");
-        properties.set(PAGE, page);
+        if (withPage) {
+            ObjectNode page = NODES.objectNode();
+            page.putArray("type").add("integer").add("null");
+            page.put("description", "Page of the file the value is read on, null if not found");
+            properties.set(PAGE, page);
+        }
         return strictObject(properties).put("description", field.schemaDescription());
     }
 
