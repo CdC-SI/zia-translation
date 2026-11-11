@@ -1,0 +1,4 @@
+id: test-extra
+description: Extra profile loaded from an external location
+fields:
+  - {key: name, description: "Name"}

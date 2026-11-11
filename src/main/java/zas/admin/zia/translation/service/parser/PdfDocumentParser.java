@@ -21,11 +21,17 @@ class PdfDocumentParser implements DocumentParser {
 
     @Override
     public List<byte[]> renderPages(byte[] documentBytes) throws IOException {
+        return renderPages(documentBytes, Integer.MAX_VALUE).pages();
+    }
+
+    @Override
+    public RenderedPages renderPages(byte[] documentBytes, int maxPages) throws IOException {
         try (PDDocument document = Loader.loadPDF(documentBytes)) {
             PDFRenderer renderer = new PDFRenderer(document);
             int pageCount = document.getNumberOfPages();
-            List<byte[]> pages = new ArrayList<>(pageCount);
-            for (int i = 0; i < pageCount; i++) {
+            int toRender = Math.clamp(maxPages, 0, pageCount);
+            List<byte[]> pages = new ArrayList<>(toRender);
+            for (int i = 0; i < toRender; i++) {
                 BufferedImage image = renderer.renderImageWithDPI(i, RENDER_DPI);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 boolean written = ImageIO.write(image, "png", out);
@@ -34,7 +40,7 @@ class PdfDocumentParser implements DocumentParser {
                 }
                 pages.add(out.toByteArray());
             }
-            return pages;
+            return new RenderedPages(pages, pageCount);
         }
     }
 

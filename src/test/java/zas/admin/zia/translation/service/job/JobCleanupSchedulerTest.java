@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import zas.admin.zia.translation.service.storage.MarkdownStorageService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
 
 import java.time.Duration;
@@ -17,6 +18,8 @@ class JobCleanupSchedulerTest {
 
     @Mock
     private PdfStorageService pdfStorageService;
+    @Mock
+    private MarkdownStorageService markdownStorageService;
 
     @Test
     void cleanupExpiredJobs_removesExpiredJobsAndFiles() {
@@ -26,13 +29,28 @@ class JobCleanupSchedulerTest {
         store.markCompleted(completed.jobId());
         store.markProcessing(processing.jobId());
 
-        JobCleanupScheduler scheduler = new JobCleanupScheduler(store, pdfStorageService, Duration.ofSeconds(-1));
+        JobCleanupScheduler scheduler = new JobCleanupScheduler(store, pdfStorageService, markdownStorageService, Duration.ofSeconds(-1));
 
         scheduler.cleanupExpiredJobs();
 
         assertThat(store.findById(completed.jobId())).isEmpty();
         assertThat(store.findById(processing.jobId())).isPresent();
         verify(pdfStorageService).delete(completed.jobId());
-        verifyNoMoreInteractions(pdfStorageService);
+        verifyNoMoreInteractions(pdfStorageService, markdownStorageService);
+    }
+
+    @Test
+    void cleanupExpiredJobs_markdownJob_deletesFromMarkdownStorage() {
+        TranslationJobStore store = new TranslationJobStore();
+        TranslationJob completed = store.createPendingJob(JobOutputFormat.MARKDOWN);
+        store.markCompleted(completed.jobId());
+
+        JobCleanupScheduler scheduler = new JobCleanupScheduler(store, pdfStorageService, markdownStorageService, Duration.ofSeconds(-1));
+
+        scheduler.cleanupExpiredJobs();
+
+        assertThat(store.findById(completed.jobId())).isEmpty();
+        verify(markdownStorageService).delete(completed.jobId());
+        verifyNoMoreInteractions(pdfStorageService, markdownStorageService);
     }
 }

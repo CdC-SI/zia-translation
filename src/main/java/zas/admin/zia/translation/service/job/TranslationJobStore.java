@@ -15,8 +15,12 @@ public class TranslationJobStore {
     private final ConcurrentHashMap<String, TranslationJob> jobs = new ConcurrentHashMap<>();
 
     public TranslationJob createPendingJob() {
+        return createPendingJob(JobOutputFormat.PDF);
+    }
+
+    public TranslationJob createPendingJob(JobOutputFormat outputFormat) {
         String jobId = UUID.randomUUID().toString();
-        TranslationJob job = new TranslationJob(jobId, JobStatus.PENDING, Instant.now(), null, null);
+        TranslationJob job = new TranslationJob(jobId, JobStatus.PENDING, Instant.now(), null, null, outputFormat);
         jobs.put(jobId, job);
         return job;
     }
@@ -31,7 +35,8 @@ public class TranslationJobStore {
                 JobStatus.PROCESSING,
                 existing.createdAt(),
                 null,
-                null));
+                null,
+                existing.outputFormat()));
     }
 
     public void markCompleted(String jobId) {
@@ -40,7 +45,8 @@ public class TranslationJobStore {
                 JobStatus.COMPLETED,
                 existing.createdAt(),
                 Instant.now(),
-                null));
+                null,
+                existing.outputFormat()));
     }
 
     public void markFailed(String jobId, String errorMessage) {
@@ -49,7 +55,8 @@ public class TranslationJobStore {
                 JobStatus.FAILED,
                 existing.createdAt(),
                 Instant.now(),
-                errorMessage));
+                errorMessage,
+                existing.outputFormat()));
     }
 
     public List<TranslationJob> findExpired(Duration ttl, Instant now) {
