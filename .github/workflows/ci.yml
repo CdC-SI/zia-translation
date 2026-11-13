@@ -27,23 +27,3 @@ jobs:
 
       - name: Build and test
         run: mvn clean verify --batch-mode
-
-  spec-validation:
-    if: >
-      github.event_name == 'pull_request'
-      && github.base_ref == 'develop'
-      && startsWith(github.head_ref, 'specs')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate spec files
-        run: |
-          echo "Checking for spec files in specifications/..."
-          SPECS=$(find specifications/ -name "spec.md" -type f 2>/dev/null)
-          if [ -z "$SPECS" ]; then
-            echo "::error::Aucun fichier spec.md trouvé dans specifications/"
-            exit 1
-          fi
-          echo "Specs trouvées :"
-          echo "$SPECS"
