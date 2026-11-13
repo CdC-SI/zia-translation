@@ -2,15 +2,11 @@
 
 <!-- Décrivez les changements apportés -->
 
-## Spec associée
-
-<!-- Lien vers specifications/<feature>/spec.md si applicable -->
-
 ## Type de changement
 
 - [ ] Nouvelle feature
 - [ ] Bug fix
-- [ ] Spécification
+- [ ] Refactoring / maintenance
 - [ ] Release
 
 ## Checklist
