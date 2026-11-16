@@ -161,7 +161,10 @@ public class ExtractionService {
         if (!request.simpleOutput()) {
             return response;
         }
-        return response.withFieldsAndCollections(simplify(response.fields()), simplifyRows(response.collections()));
+        Map<String, ExtractedField> fields = response.fields() == null ? null : simplify(response.fields());
+        Map<String, List<Map<String, ExtractedField>>> collections =
+                response.collections() == null ? null : simplifyRows(response.collections());
+        return response.withFieldsAndCollections(fields, collections);
     }
 
     /** Returns the values of each page as read, without merging the pages. */
