@@ -42,4 +42,9 @@ public record ExtractionResponse(
         return new ExtractionResponse(profile, documentType, fields, collections, warnings,
                 List.copyOf(classifiedPages), pageResults);
     }
+
+    ExtractionResponse withFieldsAndCollections(Map<String, ExtractedField> fields,
+                                                Map<String, List<Map<String, ExtractedField>>> collections) {
+        return new ExtractionResponse(profile, documentType, fields, collections, warnings, pages, pageResults);
+    }
 }

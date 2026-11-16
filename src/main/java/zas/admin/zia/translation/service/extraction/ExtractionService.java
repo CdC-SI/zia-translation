@@ -149,7 +149,19 @@ public class ExtractionService {
         if (request.perPage()) {
             return perPage(request, extractions, warnings);
         }
-        return ExtractionResultMerger.merge(request, extractions, warnings);
+        return simplifyIfRequested(request, ExtractionResultMerger.merge(request, extractions, warnings));
+    }
+
+    /**
+     * Drops {@code confidence}/{@code page} of the fields and collection cells of a merged response when the
+     * profile is {@code simpleOutput}: the model was only asked for the bare value, these are not meant to be
+     * exposed (only {@code perPage} applied this so far, merged responses leaked them).
+     */
+    private static ExtractionResponse simplifyIfRequested(ExtractionRequest request, ExtractionResponse response) {
+        if (!request.simpleOutput()) {
+            return response;
+        }
+        return response.withFieldsAndCollections(simplify(response.fields()), simplifyRows(response.collections()));
     }
 
     /** Returns the values of each page as read, without merging the pages. */
@@ -269,7 +281,9 @@ public class ExtractionService {
         if (extractions.isEmpty()) {
             throw new AllPagesFailedException("No page of the document could be analysed.", lastFailure);
         }
-        return ExtractionResultMerger.merge(request, extractions, warnings).withPages(resolution.pages());
+        ExtractionResponse merged = ExtractionResultMerger.merge(request, extractions, warnings)
+                .withPages(resolution.pages());
+        return simplifyIfRequested(request, merged);
     }
 
     private static String describe(List<Integer> pages) {
