@@ -43,6 +43,8 @@ class ExtractionProfileRegistryTest {
         assertThat(profile.fields().get("treatment.reason").values()).contains("prevention", "birthdefect");
         assertThat(profile.fields().get("law.type").values()).contains("IVG");
         assertThat(profile.instructions()).contains("identification line", "rawText");
+        assertThat(profile.instructions())
+                .contains("only the items that are checked", "never return an item that is only printed");
         assertThat(profile.instructions()).contains("biller");
         assertThat(profile.pageClassification().mainDocument()).contains("invoice", "IV office");
         assertThat(profile.pageClassification().instructions()).contains("300.001", "Rechnungskopie des Herstellers");
@@ -64,10 +66,72 @@ class ExtractionProfileRegistryTest {
     }
 
     @Test
+    void loadsCivilStatusProfileFromClasspath_asAPerPageProfileWithFixedFields() throws IOException {
+        ExtractionProfile profile = new ExtractionProfileRegistry(MAPPER, "").find("gaime-civil-status").orElseThrow();
+
+        assertThat(profile.perPage()).isTrue();
+        assertThat(profile.simpleOutput()).isTrue();
+        assertThat(profile.pageClassification()).isNull();
+        assertThat(profile.collections()).isEmpty();
+        assertThat(profile.fields()).containsOnlyKeys("civil_status_detected", "signature_present", "box_married", "box_widowed",
+                "box_divorced", "box_legally_separated", "box_married_lpart", "box_divorced_lpart",
+                "box_widowed_lpart");
+        assertThat(profile.fields().get("civil_status_detected").values()).containsExactly("true", "false", "UNCLEAR");
+        assertThat(profile.fields().get("signature_present").values()).containsExactly("true", "false", "UNCLEAR");
+        assertThat(profile.fields().get("box_widowed_lpart").values()).containsExactly("MARKED", "UNCLEAR", "UNMARKED");
+        assertThat(profile.fields().values()).allMatch(field -> !field.nullable(),
+                "every field is non-nullable so the model must commit to a value");
+        assertThat(profile.instructions()).contains("ZIVILSTANDSBESTÄTIGUNG", "\"civil_status_detected\" is \"true\"");
+    }
+
+    @Test
+    void field_nullable_defaultsTrue_andCanBeDisabledFromYaml() {
+        ExtractionProfile nullableByDefault = parse("id: p\nfields:\n  - {key: a}");
+        ExtractionProfile nonNullable = parse("id: p\nfields:\n  - {key: a, type: ENUM, values: [x, y], nullable: false}");
+
+        assertThat(nullableByDefault.fields().get("a").nullable()).isTrue();
+        assertThat(nonNullable.fields().get("a").nullable()).isFalse();
+    }
+
+    @Test
+    void field_nonNullable_isOnlyAllowedForEnum() {
+        for (String type : List.of("STRING", "DATE", "AMOUNT", "NUMBER", "IDENTIFIER")) {
+            assertThatThrownBy(() -> parse("id: p\nfields:\n  - {key: a, type: %s, nullable: false}".formatted(type)))
+                    .as(type)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("field 'a': 'nullable: false' is only allowed for ENUM fields");
+        }
+        assertThatThrownBy(() -> parse("id: p\nfields:\n  - {key: a, nullable: false}"))
+                .as("type defaults to STRING")
+                .hasMessageContaining("only allowed for ENUM fields");
+        assertThatThrownBy(() -> parse("id: p\ncollections:\n  - key: lines\n    fields: [{name: a, nullable: false}]"))
+                .as("collection field")
+                .hasMessageContaining("only allowed for ENUM fields");
+        assertThat(parse("id: p\nfields:\n  - {key: a, type: DATE, nullable: true}").fields().get("a").nullable())
+                .isTrue();
+    }
+
+    @Test
+    void simpleOutput_isOptional_andDefaultsFalse() {
+        assertThat(parse("id: p\nfields:\n  - {key: a}").simpleOutput()).isFalse();
+        assertThat(parse("id: p\nsimpleOutput: true\nfields:\n  - {key: a}").simpleOutput()).isTrue();
+    }
+
+    @Test
+    void perPage_isOptional_andCannotBeCombinedWithPageClassification() {
+        assertThat(parse("id: p\nfields:\n  - {key: a}").perPage()).isFalse();
+        assertThat(parse("id: p\nperPage: true\nfields:\n  - {key: a}").perPage()).isTrue();
+        assertThatThrownBy(() -> parse("id: p\nperPage: true\nfields:\n  - {key: a}\npageClassification: {}"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("'perPage' and 'pageClassification' cannot be combined");
+    }
+
+    @Test
     void loadsProfilesFromExternalLocation() throws IOException {
         ExtractionProfileRegistry registry = new ExtractionProfileRegistry(MAPPER, "classpath:extraction-profiles-test");
 
-        assertThat(registry.all()).extracting(ExtractionProfile::id).containsExactly("sumex-invoice", "test-extra");
+        assertThat(registry.all()).extracting(ExtractionProfile::id)
+                .containsExactly("gaime-civil-status", "sumex-invoice", "test-extra");
         assertThat(registry.find("test-extra").orElseThrow().fields().get("name").type()).isEqualTo(FieldType.STRING);
         assertThat(registry.find("unknown")).isEmpty();
     }
