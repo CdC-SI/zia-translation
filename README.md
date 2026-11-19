@@ -68,7 +68,7 @@ GET /extractions/{jobId} ◄── polling (Retry-After)
 ### 2.1 Soumission et validation (`ExtractionService.submit`)
 
 La requête est un `multipart/form-data` avec deux parties :
-- `file` : PDF, PNG, JPEG, GIF ou BMP ;
+- `file` : PDF, PNG, JPEG, GIF, BMP, TIFF (multi-pages) ou WebP ;
 - `context` : JSON (`ExtractionContext`) avec `profile`, `documentId`, `language`, `knownFields`, `missingFields`,
   `instructions` et `pageHints`.
 
@@ -87,8 +87,11 @@ Le service fait les vérifications suivantes :
      refusée (400) ;
    - **sans profil** (requête ad hoc) : chaque clé est extraite comme texte libre ; `missingFields` doit alors
      contenir au moins une clé, faute de profil pour la définir.
-4. **Document** : taille maximale `zia.translation.pdf.max-file-size`. Le type est détecté d'après la signature du
-   contenu, puis d'après le content-type déclaré.
+4. **Document** : taille maximale `zia.translation.pdf.max-file-size`. Le type est détecté d'après le **contenu**
+   seulement (Apache Tika, `DocumentParserResolver`, partagé avec la traduction) ; le content-type déclaré par le client
+   est ignoré. Refusés (400) : HEIC/HEIF/AVIF (message « exporter en JPEG ou PDF »), images de plus de
+   `zia.translation.image.max-pixels` pixels (50 MP, lu dans l'en-tête avant décodage), PDF contenant des images
+   JPEG 2000 (pas de décodeur, licence JJ2000 non retenue ; les scans JBIG2 sont décodés).
 
 Le job est créé à l'état `PENDING` et confié à l'exécuteur asynchrone. La réponse est un `202`, avec les en-têtes
 `Location` et `Retry-After`. Si l'exécuteur est saturé, la réponse est un `429`.

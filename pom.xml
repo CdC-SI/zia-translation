@@ -16,6 +16,7 @@
 
     <properties>
         <java.version>25</java.version>
+        <twelvemonkeys.version>3.12.0</twelvemonkeys.version>
         <spring-ai.version>2.0.1</spring-ai.version>
     </properties>
 
@@ -64,6 +65,33 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>3.0.4</version>
+        </dependency>
+        <!-- JBIG2 decoder for scanned PDFs (Apache 2.0). JPEG 2000 (jai-imageio-jpeg2000) is deliberately NOT added:
+             custom JJ2000 licence + unmaintained; PDFs with JPX images are rejected instead. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>jbig2-imageio</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- Document type detection from the file bytes (detection only, no parsers) -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>3.2.2</version>
+        </dependency>
+
+        <!-- Extra ImageIO decoders: TIFF (multi-page, all compressions) and WebP; pure Java, register themselves with ImageIO.
+             CMYK JPEG needs no plugin: the JDK 25 reader decodes it, ImageDocumentParser converts it to RGB. -->
+        <dependency>
+            <groupId>com.twelvemonkeys.imageio</groupId>
+            <artifactId>imageio-tiff</artifactId>
+            <version>${twelvemonkeys.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.twelvemonkeys.imageio</groupId>
+            <artifactId>imageio-webp</artifactId>
+            <version>${twelvemonkeys.version}</version>
         </dependency>
 
         <!-- Markdown to HTML -->

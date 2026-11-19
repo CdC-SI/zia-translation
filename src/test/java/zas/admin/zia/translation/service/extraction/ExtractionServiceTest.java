@@ -207,16 +207,17 @@ class ExtractionServiceTest {
     }
 
     @Test
-    void selectParser_usesContentSignatureThenDeclaredType() {
+    void submit_parserChosenFromTheBytesNotTheDeclaredContentType() throws IOException {
         ExtractionService service = service(20);
 
-        assertThat(service.selectParser(PDF, "application/octet-stream")).isSameAs(pdfParser);
-        assertThat(service.selectParser(PNG, "application/pdf")).isSameAs(imageParser);
-        assertThat(service.selectParser(new byte[]{1, 2}, "image/jpeg")).isSameAs(imageParser);
-        assertThatThrownBy(() -> service.selectParser(new byte[]{1, 2}, "application/pdf"))
+        service.submit("key-png", file(PNG, "application/pdf"), CONTEXT);
+        service.submit("key-pdf", file(PDF, "application/octet-stream"), CONTEXT);
+        assertThatThrownBy(() -> service.submit("key-unknown", file(new byte[]{1, 2}, "image/jpeg"), CONTEXT))
                 .isInstanceOf(InvalidDocumentException.class);
-        assertThatThrownBy(() -> service.selectParser(new byte[]{1, 2}, null))
-                .isInstanceOf(InvalidDocumentException.class);
+
+        verify(imageParser).validate(PNG);
+        verify(pdfParser).validate(PDF);
+        assertThat(scheduled).hasSize(2);
     }
 
     @Test
@@ -480,18 +481,6 @@ class ExtractionServiceTest {
     @Test
     void constructor_rejectsInvalidImageLimit() {
         assertThatThrownBy(() -> classifyingService(20, 0)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void detectMimeType_recognizesSignatures() {
-        assertThat(ExtractionService.detectMimeType("\n\n%PDF-1.4".getBytes(StandardCharsets.US_ASCII)))
-                .isEqualTo("application/pdf");
-        assertThat(ExtractionService.detectMimeType(PNG)).isEqualTo("image/png");
-        assertThat(ExtractionService.detectMimeType(new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0}))
-                .isEqualTo("image/jpeg");
-        assertThat(ExtractionService.detectMimeType("GIF89a".getBytes(StandardCharsets.US_ASCII))).isEqualTo("image/gif");
-        assertThat(ExtractionService.detectMimeType("BM..".getBytes(StandardCharsets.US_ASCII))).isEqualTo("image/bmp");
-        assertThat(ExtractionService.detectMimeType("%PD".getBytes(StandardCharsets.US_ASCII))).isNull();
     }
 
     private static final ExtractionContext CIVIL_STATUS_CONTEXT = new ExtractionContext("gaime-civil-status", null,

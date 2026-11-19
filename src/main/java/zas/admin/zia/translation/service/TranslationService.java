@@ -2,9 +2,7 @@ package zas.admin.zia.translation.service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -35,6 +33,7 @@ import zas.admin.zia.translation.service.language.TargetLanguageResolver;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.parser.DocumentParser;
+import zas.admin.zia.translation.service.parser.DocumentParserResolver;
 import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 import zas.admin.zia.translation.service.storage.MarkdownStorageService;
@@ -49,10 +48,7 @@ public class TranslationService {
     private static final String MARKDOWN_PAGE_SEPARATOR = "\n\n<div style=\"page-break-after: always;\"></div>\n\n";
     private static final MediaType MARKDOWN_MEDIA_TYPE = new MediaType("text", "markdown");
 
-    private static final String PDF_MIME_TYPE = "application/pdf";
-    private static final byte[] PDF_MAGIC = {'%', 'P', 'D', 'F'};
-
-    private final Map<String, DocumentParser> parsersByMimeType;
+    private final DocumentParserResolver parserResolver;
     private final OcrExtractionService ocrService;
     private final TextTranslationService textTranslationService;
     private final PdfGenerationService pdfGenerationService;
@@ -80,7 +76,7 @@ public class TranslationService {
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize,
             @Value("${zia.translation.text.max-length}") int maxTextLength) {
 
-        this.parsersByMimeType = buildParsersByMimeType(parsers);
+        this.parserResolver = new DocumentParserResolver(parsers);
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
         this.pdfGenerationService = pdfGenerationService;
@@ -98,7 +94,7 @@ public class TranslationService {
     public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
         TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
+        DocumentParser parser = parserResolver.resolve(bytes);
 
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
         TranslationJob job = submitJob(JobOutputFormat.PDF,
@@ -110,7 +106,7 @@ public class TranslationService {
     public TranslationJobResponse submitMarkdownTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
         TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
+        DocumentParser parser = parserResolver.resolve(bytes);
 
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
         TranslationJob job = submitJob(JobOutputFormat.MARKDOWN,
@@ -206,7 +202,7 @@ public class TranslationService {
     public byte[] translateToPdf(MultipartFile file, String targetLanguage) throws IOException {
         TargetLanguage language = targetLanguageResolver.resolve(targetLanguage);
         byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
+        DocumentParser parser = parserResolver.resolve(bytes);
         List<PageLayout> pageLayouts;
         List<byte[]> pages;
         try {
@@ -286,7 +282,7 @@ public class TranslationService {
 
     private List<byte[]> extractPages(MultipartFile file) throws IOException {
         byte[] bytes = validateAndRead(file);
-        DocumentParser parser = resolveParser(file, bytes);
+        DocumentParser parser = parserResolver.resolve(bytes);
         try {
             return parser.renderPages(bytes);
         } catch (IOException exception) {
@@ -317,52 +313,8 @@ public class TranslationService {
         }
     }
 
-    private DocumentParser resolveParser(MultipartFile file, byte[] bytes) {
-        String contentType = file.getContentType();
-        DocumentParser parser = null;
-        if (contentType != null) {
-            parser = parsersByMimeType.get(contentType);
-        }
-        if (parser == null && isPdf(bytes)) {
-                parser = parsersByMimeType.get(PDF_MIME_TYPE);
-            }
-
-        if (parser == null) {
-            throw new InvalidDocumentException(
-                    "Unsupported file format: '%s'. Supported formats: %s."
-                            .formatted(contentType, parsersByMimeType.keySet()));
-        }
-        return parser;
-    }
-
-    private static boolean isPdf(byte[] bytes) {
-        if (bytes.length < PDF_MAGIC.length) {
-            return false;
-        }
-        for (int i = 0; i < PDF_MAGIC.length; i++) {
-            if (bytes[i] != PDF_MAGIC[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private TranslationJobResponse toResponse(TranslationJob job) {
         return new TranslationJobResponse(job.jobId(), job.status());
-    }
-
-    private static Map<String, DocumentParser> buildParsersByMimeType(List<DocumentParser> parsers) {
-        Map<String, DocumentParser> parserMap = new LinkedHashMap<>();
-        for (DocumentParser parser : parsers) {
-            for (String mimeType : parser.supportedMimeTypes()) {
-                DocumentParser previous = parserMap.putIfAbsent(mimeType, parser);
-                if (previous != null && previous != parser) {
-                    throw new IllegalStateException("Duplicate parser mapping for MIME type '%s'."
-                            .formatted(mimeType));
-                }
-            }
-        }
-        return Map.copyOf(parserMap);
     }
 
     private static long parseSize(String sizeStr) {

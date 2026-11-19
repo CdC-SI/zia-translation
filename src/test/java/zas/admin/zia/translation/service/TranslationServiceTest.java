@@ -127,7 +127,7 @@ class TranslationServiceTest {
 
         assertThatThrownBy(() -> dualService.translateToText(file, "fr"))
                 .isInstanceOf(InvalidDocumentException.class)
-                .hasMessageContaining("Unsupported file format")
+                .hasMessageContaining("Unsupported document format 'text/plain'")
                 .hasMessageContaining("Supported formats")
                 .hasMessageContaining("application/pdf")
                 .hasMessageContaining("image/png");
@@ -149,17 +149,40 @@ class TranslationServiceTest {
     }
 
     @Test
-    void resolveParser_imageContentType_resolvesImageParser() throws IOException {
+    void resolveParser_pngBytes_resolvesImageParser() throws IOException {
         when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenReturn(List.of("text"));
         when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("translated"));
 
-        MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", new byte[]{1, 2, 3});
+        MockMultipartFile file = new MockMultipartFile("file", "image.png", "image/png", imageBytes("png"));
 
         List<String> result = dualService.translateToText(file, "fr");
 
         assertThat(result).containsExactly("translated");
         verify(imageParser).renderPages(any());
+    }
+
+    @Test
+    void resolveParser_ignoresTheDeclaredContentType() throws IOException {
+        when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
+        when(ocrService.extractText(any())).thenReturn(List.of("text"));
+        when(textTranslationService.translatePages(any(), any(TargetLanguage.class), eq(false))).thenReturn(List.of("translated"));
+        byte[] jpeg = imageBytes("jpeg");
+
+        // labels guessed by clients: unknown, generic, non-standard, or plain wrong
+        for (String label : new String[]{null, "application/octet-stream", "image/pjpeg", "application/pdf"}) {
+            dualService.translateToText(new MockMultipartFile("file", "scan", label, jpeg), "fr");
+        }
+
+        verify(imageParser, org.mockito.Mockito.times(4)).renderPages(jpeg);
+        verify(pdfParser, never()).renderPages(any());
+    }
+
+    private static byte[] imageBytes(String format) throws IOException {
+        try (var out = new java.io.ByteArrayOutputStream()) {
+            javax.imageio.ImageIO.write(new java.awt.image.BufferedImage(4, 4, java.awt.image.BufferedImage.TYPE_INT_RGB), format, out);
+            return out.toByteArray();
+        }
     }
 
     // --- corrupt PDF (IOException from renderPages) ---
@@ -352,7 +375,7 @@ class TranslationServiceTest {
         when(textTranslationService.translatePageSingleStrategyStream(any(), any(TargetLanguage.class)))
                 .thenThrow(new ImagePreprocessingException("invalid image"));
 
-        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", new byte[]{1});
+        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", imageBytes("png"));
 
         StepVerifier.create(singleService.translateToTextStream(file, "fr", null))
                 .expectErrorSatisfies(error -> {
@@ -367,7 +390,7 @@ class TranslationServiceTest {
         when(imageParser.renderPages(any())).thenReturn(List.of(new byte[]{1}));
         when(ocrService.extractText(any())).thenThrow(new ImagePreprocessingException("invalid image"));
 
-        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", new byte[]{1});
+        MockMultipartFile file = new MockMultipartFile("file", "test.png", "image/png", imageBytes("png"));
 
         StepVerifier.create(dualService.translateToTextStream(file, "fr", null))
                 .expectErrorSatisfies(error -> {
