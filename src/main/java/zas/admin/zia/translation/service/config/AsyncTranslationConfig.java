@@ -17,7 +17,7 @@ class AsyncTranslationConfig {
     @Bean(name = "translationTaskExecutor")
     Executor translationTaskExecutor(
             @Value("${zia.translation.async.pool-size}") int poolSize,
-            @Value("${zia.translation.async.queue-capacity:100}") int queueCapacity) {
+            @Value("${zia.translation.async.queue-capacity:20}") int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(poolSize);
         executor.setMaxPoolSize(poolSize);

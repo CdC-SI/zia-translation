@@ -1,5 +1,15 @@
 package zas.admin.zia.translation.service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Consumer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -8,6 +18,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -28,15 +39,6 @@ import zas.admin.zia.translation.service.parser.PageLayout;
 import zas.admin.zia.translation.service.pdf.PdfGenerationService;
 import zas.admin.zia.translation.service.storage.MarkdownStorageService;
 import zas.admin.zia.translation.service.storage.PdfStorageService;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 @Service
 public class TranslationService {
@@ -98,10 +100,9 @@ public class TranslationService {
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
-        TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.PDF);
-
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
-        CompletableFuture.runAsync(() -> processPdfJob(job.jobId(), parser, bytes, language, resolvedStrategy), translationTaskExecutor);
+        TranslationJob job = submitJob(JobOutputFormat.PDF,
+                jobId -> processPdfJob(jobId, parser, bytes, language, resolvedStrategy));
 
         return toResponse(job);
     }
@@ -111,12 +112,27 @@ public class TranslationService {
         byte[] bytes = validateAndRead(file);
         DocumentParser parser = resolveParser(file, bytes);
 
-        TranslationJob job = translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN);
-
         TranslationStrategy resolvedStrategy = resolveStrategy(strategy);
-        CompletableFuture.runAsync(() -> processMarkdownJob(job.jobId(), parser, bytes, language, resolvedStrategy), translationTaskExecutor);
+        TranslationJob job = submitJob(JobOutputFormat.MARKDOWN,
+                jobId -> processMarkdownJob(jobId, parser, bytes, language, resolvedStrategy));
 
         return toResponse(job);
+    }
+
+    /**
+     * Creates the job and queues its processing as one step: when the executor is full, the job is removed again
+     * and the caller gets a {@link TranslationCapacityExceededException} (HTTP 429) instead of a job stuck in PENDING.
+     */
+    private TranslationJob submitJob(JobOutputFormat outputFormat, Consumer<String> processing) {
+        TranslationJob job = translationJobStore.createPendingJob(outputFormat);
+        try {
+            translationTaskExecutor.execute(() -> processing.accept(job.jobId()));
+        } catch (RejectedExecutionException exception) {
+            translationJobStore.delete(job.jobId());
+            log.warn("Translation queue full, rejected {} job", outputFormat);
+            throw new TranslationCapacityExceededException("Too many translations in progress, retry later.", exception);
+        }
+        return job;
     }
 
     public Optional<TranslationJobResponse> getJobStatusResponse(String jobId) {
@@ -215,6 +231,11 @@ public class TranslationService {
         } catch (Exception exception) {
             log.error("PDF translation job failed for jobId={}", jobId, exception);
             translationJobStore.markFailed(jobId, PDF_TRANSLATION_FAILED_MESSAGE);
+        } catch (Error error) {
+            // e.g. OutOfMemoryError: the job must still end, otherwise it stays PROCESSING forever
+            log.error("PDF translation job failed for jobId={}", jobId, error);
+            translationJobStore.markFailed(jobId, PDF_TRANSLATION_FAILED_MESSAGE);
+            throw error;
         }
     }
 
@@ -229,6 +250,11 @@ public class TranslationService {
         } catch (Exception exception) {
             log.error("Markdown translation job failed for jobId={}", jobId, exception);
             translationJobStore.markFailed(jobId, MARKDOWN_TRANSLATION_FAILED_MESSAGE);
+        } catch (Error error) {
+            // e.g. OutOfMemoryError: the job must still end, otherwise it stays PROCESSING forever
+            log.error("Markdown translation job failed for jobId={}", jobId, error);
+            translationJobStore.markFailed(jobId, MARKDOWN_TRANSLATION_FAILED_MESSAGE);
+            throw error;
         }
     }
 

@@ -3,6 +3,7 @@ package zas.admin.zia.translation.service.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.TranslationCapacityExceededException;
 import zas.admin.zia.translation.service.TranslationProcessingException;
 import zas.admin.zia.translation.service.dto.ErrorResponse;
 
@@ -26,6 +28,7 @@ import java.util.stream.Collectors;
 class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String CAPACITY_RETRY_AFTER_SECONDS = "30";
 
     @ExceptionHandler(InvalidDocumentException.class)
     ResponseEntity<ErrorResponse> handleInvalidDocument(InvalidDocumentException ex) {
@@ -35,6 +38,13 @@ class GlobalExceptionHandler {
     @ExceptionHandler(TranslationProcessingException.class)
     ResponseEntity<ErrorResponse> handleTranslationProcessing(TranslationProcessingException ex) {
         return buildResponse(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+    }
+
+    @ExceptionHandler(TranslationCapacityExceededException.class)
+    ResponseEntity<ErrorResponse> handleCapacityExceeded(TranslationCapacityExceededException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, CAPACITY_RETRY_AFTER_SECONDS)
+                .body(new ErrorResponse(HttpStatus.TOO_MANY_REQUESTS.value(), ex.getMessage(), Instant.now()));
     }
 
     @ExceptionHandler(MissingServletRequestParameterException.class)

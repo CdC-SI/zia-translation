@@ -25,6 +25,8 @@ import zas.admin.zia.translation.service.storage.PdfStorageService;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -501,6 +503,60 @@ class TranslationServiceTest {
         verify(translationJobStore).markProcessing("123e4567-e89b-12d3-a456-426614174000");
         verify(translationJobStore).markFailed(eq("123e4567-e89b-12d3-a456-426614174000"), eq("PDF translation failed."));
         verify(translationJobStore, never()).markCompleted(anyString());
+    }
+
+    @Test
+    void submitPdfTranslation_queueFull_removesJobAndThrowsCapacityExceeded() {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("job-rejected-pdf", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.PDF));
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        assertThatThrownBy(() -> serviceWithExecutor(rejectingExecutor()).submitPdfTranslation(file, "fr", null))
+                .isInstanceOf(TranslationCapacityExceededException.class)
+                .hasCauseInstanceOf(RejectedExecutionException.class);
+
+        verify(translationJobStore).delete("job-rejected-pdf");
+        verify(translationJobStore, never()).markProcessing(anyString());
+    }
+
+    @Test
+    void submitMarkdownTranslation_queueFull_removesJobAndThrowsCapacityExceeded() {
+        when(translationJobStore.createPendingJob(JobOutputFormat.MARKDOWN)).thenReturn(
+                new TranslationJob("job-rejected-md", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.MARKDOWN));
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        assertThatThrownBy(() -> serviceWithExecutor(rejectingExecutor()).submitMarkdownTranslation(file, "fr", null))
+                .isInstanceOf(TranslationCapacityExceededException.class);
+
+        verify(translationJobStore).delete("job-rejected-md");
+    }
+
+    @Test
+    void submitPdfTranslation_processingThrowsError_marksJobFailedAndRethrows() throws IOException {
+        when(translationJobStore.createPendingJob(JobOutputFormat.PDF)).thenReturn(
+                new TranslationJob("job-oom", JobStatus.PENDING, Instant.now(), null, null, JobOutputFormat.PDF));
+        when(pdfParser.extractPageLayouts(any())).thenThrow(new OutOfMemoryError("simulated"));
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES);
+
+        // Runnable::run executes the job inline, so the rethrown Error reaches the test
+        assertThatThrownBy(() -> dualService.submitPdfTranslation(file, "fr", null))
+                .isInstanceOf(OutOfMemoryError.class);
+
+        verify(translationJobStore).markFailed("job-oom", "PDF translation failed.");
+        verify(translationJobStore, never()).markCompleted(anyString());
+    }
+
+    private TranslationService serviceWithExecutor(Executor executor) {
+        return new TranslationService(
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), executor,
+                "dual", "10MB", 20000);
+    }
+
+    private static Executor rejectingExecutor() {
+        return command -> {
+            throw new RejectedExecutionException("queue full");
+        };
     }
 
     // --- markdown translation ---

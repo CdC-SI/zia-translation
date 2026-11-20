@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import reactor.core.publisher.Flux;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.TranslationCapacityExceededException;
 import zas.admin.zia.translation.service.TranslationService;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
@@ -74,6 +75,36 @@ class TranslationControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.jobId").value("job-md-1"))
                 .andExpect(jsonPath("$.status").value("PENDING"));
+    }
+
+    @Test
+    void translateToPdf_queueFull_returns429WithRetryAfter() throws Exception {
+        when(translationService.submitPdfTranslation(any(), anyString(), isNull()))
+                .thenThrow(new TranslationCapacityExceededException("Too many translations in progress, retry later.", null));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/pdf")
+                        .file(file)
+                        .param("targetLanguage", "fr"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "30"))
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.message").value("Too many translations in progress, retry later."));
+    }
+
+    @Test
+    void translateToMarkdown_queueFull_returns429WithRetryAfter() throws Exception {
+        when(translationService.submitMarkdownTranslation(any(), anyString(), isNull()))
+                .thenThrow(new TranslationCapacityExceededException("Too many translations in progress, retry later.", null));
+
+        MockMultipartFile file = new MockMultipartFile("file", "test.pdf", "application/pdf", "%PDF".getBytes());
+
+        mockMvc.perform(multipart("/api/translation/md")
+                        .file(file)
+                        .param("targetLanguage", "fr"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "30"));
     }
 
     @Test

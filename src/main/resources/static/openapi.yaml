@@ -44,6 +44,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many translations in progress; retry after the number of seconds in `Retry-After`
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /pdf/{jobId}/status:
     get:
@@ -130,6 +140,16 @@ paths:
                 $ref: '#/components/schemas/TranslationJobResponse'
         '400':
           description: Bad request — missing file, empty file, unsupported format, or unknown strategy value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many translations in progress; retry after the number of seconds in `Retry-After`
+          headers:
+            Retry-After:
+              schema:
+                type: integer
           content:
             application/json:
               schema:
