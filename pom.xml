@@ -81,6 +81,13 @@
             <version>3.2.2</version>
         </dependency>
 
+        <!-- EXIF orientation of uploaded photos (ImageIO ignores it) -->
+        <dependency>
+            <groupId>com.drewnoakes</groupId>
+            <artifactId>metadata-extractor</artifactId>
+            <version>2.19.0</version>
+        </dependency>
+
         <!-- Extra ImageIO decoders: TIFF (multi-page, all compressions) and WebP; pure Java, register themselves with ImageIO.
              CMYK JPEG needs no plugin: the JDK 25 reader decodes it, ImageDocumentParser converts it to RGB. -->
         <dependency>

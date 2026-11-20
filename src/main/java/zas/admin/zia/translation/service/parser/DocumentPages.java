@@ -13,8 +13,9 @@ public interface DocumentPages extends AutoCloseable {
     int pageCount();
 
     /**
-     * Size of the page as displayed, in PDF points: for PDFs the crop box, width and height swapped when the page
-     * is rotated by 90 or 270 degrees (what the renderer produces).
+     * Size of the output page, in PDF points. For PDFs: the crop box, width and height swapped when the page is
+     * rotated by 90 or 270 degrees (what the renderer produces). For images: A4, landscape when the upright image
+     * is wider than tall (pixel sizes are not points).
      *
      * @param index page index, from 0
      */

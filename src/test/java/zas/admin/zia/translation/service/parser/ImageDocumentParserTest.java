@@ -1,6 +1,8 @@
 package zas.admin.zia.translation.service.parser;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 
 import javax.imageio.IIOImage;
@@ -62,11 +64,69 @@ class ImageDocumentParserTest {
                 .hasMessageContaining("Unable to read image");
     }
 
+    // --- output page: A4, oriented like the upright image (pixels are not points) ---
+
+    private static final PageLayout A4_PORTRAIT = new PageLayout(595.27563f, 841.8898f);
+    private static final PageLayout A4_LANDSCAPE = new PageLayout(841.8898f, 595.27563f);
+
     @Test
-    void layout_returnsPixelDimensions() throws IOException {
-        try (DocumentPages pages = parser.open(createImageBytes("png", 200, 100))) {
-            assertThat(pages.layout(0)).isEqualTo(new PageLayout(200f, 100f));
+    void layout_landscapePhoto_a4Landscape() throws IOException {
+        // same 4:3 ratio as a 4032x3024 phone photo, which used to give a 142 x 107 cm page
+        assertThat(layoutOf(createImageBytes("jpeg", 403, 302))).isEqualTo(A4_LANDSCAPE);
+    }
+
+    @Test
+    void layout_portraitPhoto_a4Portrait() throws IOException {
+        assertThat(layoutOf(createImageBytes("jpeg", 302, 403))).isEqualTo(A4_PORTRAIT);
+        assertThat(layoutOf(createImageBytes("png", 100, 100))).isEqualTo(A4_PORTRAIT);   // square: portrait
+    }
+
+    @Test
+    void layout_photoStoredLandscapeWithOrientation6_a4Portrait() throws IOException {
+        // phones store a portrait shot as a landscape image + "rotate 90" in EXIF
+        assertThat(layoutOf(withExifOrientation(createImageBytes("jpeg", 403, 302), 6))).isEqualTo(A4_PORTRAIT);
+        assertThat(layoutOf(withExifOrientation(createImageBytes("jpeg", 403, 302), 3))).isEqualTo(A4_LANDSCAPE);
+    }
+
+    // --- EXIF orientation: the stored image has a red block in its top-left corner ---
+
+    @ParameterizedTest(name = "orientation {0} -> {1}x{2}, red corner {3}")
+    @CsvSource({
+            "1, 80, 40, top-left",
+            "2, 80, 40, top-right",
+            "3, 80, 40, bottom-right",
+            "4, 80, 40, bottom-left",
+            "5, 40, 80, top-left",
+            "6, 40, 80, top-right",
+            "7, 40, 80, bottom-right",
+            "8, 40, 80, bottom-left"})
+    void render_appliesTheExifOrientation(int orientation, int width, int height, String redCorner) throws IOException {
+        byte[] jpeg = withExifOrientation(markedImage(), orientation);
+
+        BufferedImage page = renderAll(jpeg).getFirst();
+
+        assertThat(page.getWidth()).isEqualTo(width);
+        assertThat(page.getHeight()).isEqualTo(height);
+        for (String corner : List.of("top-left", "top-right", "bottom-left", "bottom-right")) {
+            int rgb = cornerPixel(page, corner);
+            boolean red = ((rgb >> 16) & 0xFF) > 180 && ((rgb >> 8) & 0xFF) < 90 && (rgb & 0xFF) < 90;
+            assertThat(red).as("corner %s red", corner).isEqualTo(corner.equals(redCorner));
         }
+    }
+
+    @Test
+    void readOrientation_noOrUnreadableExif_normal() throws IOException {
+        assertThat(ImageDocumentParser.readOrientation(createImageBytes("jpeg", 10, 10))).isEqualTo(1);
+        assertThat(ImageDocumentParser.readOrientation(createImageBytes("png", 10, 10))).isEqualTo(1);
+        assertThat(ImageDocumentParser.readOrientation(new byte[]{1, 2, 3})).isEqualTo(1);
+        assertThat(ImageDocumentParser.readOrientation(withExifOrientation(createImageBytes("jpeg", 10, 10), 9))).isEqualTo(1);
+    }
+
+    @Test
+    void render_imageWithoutExif_returnedAsDecoded() throws IOException {
+        BufferedImage stored = new BufferedImage(8, 4, BufferedImage.TYPE_INT_RGB);
+
+        assertThat(ImageDocumentParser.toUprightRgb(stored, 1)).isSameAs(stored);
     }
 
     @Test
@@ -75,7 +135,7 @@ class ImageDocumentParserTest {
 
         assertThat(renderAll(tiff)).hasSize(3);
         try (DocumentPages pages = parser.open(tiff)) {
-            assertThat(List.of(pages.layout(0), pages.layout(1), pages.layout(2))).containsOnly(new PageLayout(40f, 20f));
+            assertThat(List.of(pages.layout(0), pages.layout(1), pages.layout(2))).containsOnly(A4_LANDSCAPE);   // 40x20 frames
         }
     }
 
@@ -137,6 +197,50 @@ class ImageDocumentParserTest {
     @Test
     void constructor_rejectsInvalidPixelLimit() {
         assertThatThrownBy(() -> new ImageDocumentParser(0)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private PageLayout layoutOf(byte[] bytes) throws IOException {
+        try (DocumentPages pages = parser.open(bytes)) {
+            return pages.layout(0);
+        }
+    }
+
+    /** 80x40 white JPEG with a 40x20 red block in its top-left quarter. */
+    private static byte[] markedImage() throws IOException {
+        BufferedImage image = new BufferedImage(80, 40, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < 40; y++) {
+            for (int x = 0; x < 80; x++) {
+                image.setRGB(x, y, x < 40 && y < 20 ? 0xFF0000 : 0xFFFFFF);
+            }
+        }
+        try (var out = new ByteArrayOutputStream()) {
+            ImageIO.write(image, "jpeg", out);
+            return out.toByteArray();
+        }
+    }
+
+    private static int cornerPixel(BufferedImage image, String corner) {
+        int x = corner.endsWith("left") ? 3 : image.getWidth() - 4;
+        int y = corner.startsWith("top") ? 3 : image.getHeight() - 4;
+        return image.getRGB(x, y);
+    }
+
+    /**
+     * Inserts an EXIF APP1 segment holding only the Orientation tag after the JFIF APP0 segment, as cameras do.
+     */
+    private static byte[] withExifOrientation(byte[] jpeg, int orientation) {
+        byte[] payload = {
+                'E', 'x', 'i', 'f', 0, 0,
+                'M', 'M', 0, 42, 0, 0, 0, 8,                  // big-endian TIFF header, IFD0 at offset 8
+                0, 1,                                         // one entry
+                0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, (byte) orientation, 0, 0,   // 0x0112 Orientation, SHORT, 1 value
+                0, 0, 0, 0};                                  // no next IFD
+        int insertAt = 4 + (((jpeg[4] & 0xFF) << 8) | (jpeg[5] & 0xFF));   // after SOI + APP0
+        ByteBuffer out = ByteBuffer.allocate(jpeg.length + 4 + payload.length);
+        out.put(jpeg, 0, insertAt);
+        out.put((byte) 0xFF).put((byte) 0xE1).putShort((short) (payload.length + 2)).put(payload);
+        out.put(jpeg, insertAt, jpeg.length - insertAt);
+        return out.array();
     }
 
     private List<BufferedImage> renderAll(byte[] bytes) throws IOException {
