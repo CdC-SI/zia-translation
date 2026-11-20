@@ -11,15 +11,15 @@ import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.io.UncheckedIOException;
 import java.util.Iterator;
 import java.util.List;
 
 /**
- * Image uploads. Decoders come from the JDK plus TwelveMonkeys (CMYK JPEG, TIFF, WebP), which registers itself
- * with ImageIO. A multi-page TIFF gives one page per frame; other formats give one page (first frame).
+ * Image uploads. Decoders come from the JDK plus TwelveMonkeys (TIFF, WebP), which registers itself with ImageIO.
+ * A multi-page TIFF gives one page per frame; other formats give one page (first frame). Frames are decoded on
+ * demand and converted to RGB on white (CMYK, grayscale, indexed, alpha).
  */
 @Component
 class ImageDocumentParser implements DocumentParser {
@@ -42,15 +42,8 @@ class ImageDocumentParser implements DocumentParser {
     }
 
     @Override
-    public List<byte[]> renderPages(byte[] documentBytes) throws IOException {
-        try (Frames frames = Frames.open(documentBytes)) {
-            List<byte[]> pages = new ArrayList<>(frames.count());
-            for (int i = 0; i < frames.count(); i++) {
-                checkSize(frames, i);
-                pages.add(encodePng(toRgb(frames.reader().read(i))));
-            }
-            return pages;
-        }
+    public DocumentPages open(byte[] documentBytes) throws IOException {
+        return new ImagePages(Frames.open(documentBytes));
     }
 
     @Override
@@ -70,17 +63,6 @@ class ImageDocumentParser implements DocumentParser {
             }
         } catch (IOException unreadable) {
             // not decided here: rendering reports unreadable images
-        }
-    }
-
-    @Override
-    public List<PageLayout> extractPageLayouts(byte[] documentBytes) throws IOException {
-        try (Frames frames = Frames.open(documentBytes)) {
-            List<PageLayout> layouts = new ArrayList<>(frames.count());
-            for (int i = 0; i < frames.count(); i++) {
-                layouts.add(new PageLayout(frames.reader().getWidth(i), frames.reader().getHeight(i)));
-            }
-            return layouts;
         }
     }
 
@@ -109,12 +91,41 @@ class ImageDocumentParser implements DocumentParser {
         return rgb;
     }
 
-    private static byte[] encodePng(BufferedImage image) throws IOException {
-        try (var outputStream = new ByteArrayOutputStream()) {
-            if (!ImageIO.write(image, "png", outputStream)) {
-                throw new IOException("No suitable ImageIO writer found for PNG format.");
+    /**
+     * The frames of an image, decoded on demand. Layouts are the pixel sizes (read from the header), used as points
+     * for the output PDF page (to be replaced by an A4 page, see ticket T5).
+     */
+    private final class ImagePages implements DocumentPages {
+
+        private final Frames frames;
+
+        ImagePages(Frames frames) {
+            this.frames = frames;
+        }
+
+        @Override
+        public int pageCount() {
+            return frames.count();
+        }
+
+        @Override
+        public synchronized PageLayout layout(int index) {
+            try {
+                return new PageLayout(frames.reader().getWidth(index), frames.reader().getHeight(index));
+            } catch (IOException exception) {
+                throw new UncheckedIOException("Unable to read the size of image frame " + (index + 1), exception);
             }
-            return outputStream.toByteArray();
+        }
+
+        @Override
+        public synchronized BufferedImage render(int index) throws IOException {
+            checkSize(frames, index);
+            return toRgb(frames.reader().read(index));
+        }
+
+        @Override
+        public synchronized void close() throws IOException {
+            frames.close();
         }
     }
 

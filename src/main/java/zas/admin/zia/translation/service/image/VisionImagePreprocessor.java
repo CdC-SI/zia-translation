@@ -51,8 +51,13 @@ public class VisionImagePreprocessor {
     }
 
     public PreprocessedImage preprocess(byte[] imageBytes) {
-        BufferedImage source = readImage(imageBytes);
+        return preprocess(readImage(imageBytes));
+    }
 
+    /**
+     * Resizes and encodes an already decoded page (no decoding step: pages come rendered from the parsers).
+     */
+    public PreprocessedImage preprocess(BufferedImage source) {
         int width = source.getWidth();
         int height = source.getHeight();
 
@@ -65,7 +70,11 @@ public class VisionImagePreprocessor {
     }
 
     public Media toMedia(byte[] imageBytes) {
-        PreprocessedImage preprocessed = preprocess(imageBytes);
+        return toMedia(readImage(imageBytes));
+    }
+
+    public Media toMedia(BufferedImage image) {
+        PreprocessedImage preprocessed = preprocess(image);
         return new Media(preprocessed.mimeType(), new ByteArrayResource(preprocessed.bytes()));
     }
 

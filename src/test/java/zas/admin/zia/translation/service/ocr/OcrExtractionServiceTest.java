@@ -2,7 +2,6 @@ package zas.admin.zia.translation.service.ocr;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -13,7 +12,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.util.MimeTypeUtils;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
-import java.util.List;
+import java.awt.image.BufferedImage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,60 +32,38 @@ class OcrExtractionServiceTest {
     @InjectMocks
     private OcrExtractionService service;
 
+    private static final BufferedImage PAGE = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+
     @Test
-    void extractText_singlePage_returnsExtractedText() {
+    void extractText_returnsExtractedText() {
         stubPreprocessor();
         stubVisionClient("Extracted text from page");
 
-        List<String> result = service.extractText(List.of(new byte[]{1, 2, 3}));
-
-        assertThat(result).containsExactly("Extracted text from page");
-    }
-
-    @Test
-    void extractText_multiplePages_returnsOneEntryPerPage() {
-        stubPreprocessor();
-        stubVisionClient("page text");
-
-        List<byte[]> pages = List.of(new byte[]{1}, new byte[]{2}, new byte[]{3});
-        List<String> result = service.extractText(pages);
-
-        assertThat(result).hasSize(3);
+        assertThat(service.extractText(PAGE)).isEqualTo("Extracted text from page");
     }
 
     @Test
     void extractText_nullResponseContent_returnsEmptyString() {
         stubPreprocessor();
-        ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
-        when(callResponseSpec.content()).thenReturn(null);
+        stubVisionClient(null);
 
-        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
-        when(requestSpec.messages(any(Message.class))).thenReturn(requestSpec);
-        when(requestSpec.call()).thenReturn(callResponseSpec);
-
-        when(visionClient.prompt()).thenReturn(requestSpec);
-
-        List<String> result = service.extractText(List.of(new byte[]{1}));
-
-        assertThat(result).containsExactly("");
+        assertThat(service.extractText(PAGE)).isEmpty();
     }
 
     @Test
-    void extractText_usesPreprocessedJpegMedia() {
+    void extractText_sendsThePreprocessedPage() {
         stubVisionClient("Extracted text from page");
-        ArgumentCaptor<byte[]> bytesCaptor = ArgumentCaptor.forClass(byte[].class);
         Media jpegMedia = new Media(MimeTypeUtils.IMAGE_JPEG, new ByteArrayResource(new byte[]{9, 9, 9}));
-        when(imagePreprocessor.toMedia(bytesCaptor.capture())).thenReturn(jpegMedia);
+        when(imagePreprocessor.toMedia(PAGE)).thenReturn(jpegMedia);
 
-        service.extractText(List.of(new byte[]{1, 2, 3}));
+        service.extractText(PAGE);
 
-        verify(imagePreprocessor).toMedia(any(byte[].class));
-        assertThat(bytesCaptor.getValue()).containsExactly(1, 2, 3);
+        verify(imagePreprocessor).toMedia(PAGE);
     }
 
     private void stubPreprocessor() {
         Media jpegMedia = new Media(MimeTypeUtils.IMAGE_JPEG, new ByteArrayResource(new byte[]{9, 9, 9}));
-        when(imagePreprocessor.toMedia(any(byte[].class))).thenReturn(jpegMedia);
+        when(imagePreprocessor.toMedia(any(BufferedImage.class))).thenReturn(jpegMedia);
     }
 
     private void stubVisionClient(String content) {

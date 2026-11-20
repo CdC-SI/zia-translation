@@ -7,8 +7,9 @@ import org.springframework.util.unit.DataSize;
 import tools.jackson.databind.json.JsonMapper;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 import zas.admin.zia.translation.service.parser.DocumentParser;
-import zas.admin.zia.translation.service.parser.RenderedPages;
+import zas.admin.zia.translation.service.parser.TestDocumentPages;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -62,10 +63,8 @@ class ExtractionServiceTest {
         classifier = mock(PageClassifier.class);
         pdfParser = mock(DocumentParser.class);
         when(pdfParser.supportedMimeTypes()).thenReturn(List.of("application/pdf"));
-        when(pdfParser.renderPages(any(), anyInt())).thenCallRealMethod();
         imageParser = mock(DocumentParser.class);
         when(imageParser.supportedMimeTypes()).thenReturn(List.of("image/png", "image/jpeg"));
-        when(imageParser.renderPages(any(), anyInt())).thenCallRealMethod();
     }
 
     private ExtractionService service(int maxPages) {
@@ -222,7 +221,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_extractsEachPageAndMergesResult() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(List.of(new byte[]{1}, new byte[]{2}));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(2));
         when(extractor.extract(any(), eq(1), eq(2), any()))
                 .thenReturn(new PageExtraction(1, "invoice",
                         Map.of("biller.gln", new ExtractedField("7601000152916", 0.6, 1, "7601000152916")),
@@ -253,7 +252,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_image_usesImageParser() throws IOException {
-        when(imageParser.renderPages(PNG)).thenReturn(List.of(PNG));
+        when(imageParser.open(PNG)).thenReturn(TestDocumentPages.of(1));
         when(extractor.extract(any(), anyInt(), anyInt(), any()))
                 .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
         ExtractionService service = service(20);
@@ -262,12 +261,12 @@ class ExtractionServiceTest {
         scheduled.getFirst().run();
 
         assertThat(service.find(jobId).orElseThrow().status()).isEqualTo(ExtractionStatus.SUCCEEDED);
-        verify(pdfParser, never()).renderPages(any());
+        verify(pdfParser, never()).open(any());
     }
 
     @Test
     void process_pageFailure_isReportedAsWarning() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(List.of(new byte[]{1}, new byte[]{2}));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(2));
         when(extractor.extract(any(), eq(1), anyInt(), any()))
                 .thenThrow(new VisionFieldExtractor.PageExtractionException("bad json", null));
         when(extractor.extract(any(), eq(2), anyInt(), any()))
@@ -284,7 +283,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_allPagesFail_marksJobFailed() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(List.of(new byte[]{1}));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(1));
         when(extractor.extract(any(), anyInt(), anyInt(), any()))
                 .thenThrow(new VisionFieldExtractor.PageExtractionException("bad json", null));
         ExtractionService service = service(20);
@@ -300,7 +299,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_unreadableDocument_marksJobFailed() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenThrow(new IOException("corrupted"));
+        when(pdfParser.open(PDF)).thenThrow(new IOException("corrupted"));
         ExtractionService service = service(20);
         String jobId = service.submit("key", pdf(PDF), CONTEXT).jobId();
 
@@ -313,8 +312,44 @@ class ExtractionServiceTest {
     }
 
     @Test
+    void process_pageCannotBeRendered_marksJobUnreadableAndClosesTheDocument() throws IOException {
+        TestDocumentPages pages = TestDocumentPages.of(2).failingRender(new IOException("broken page"));
+        when(pdfParser.open(PDF)).thenReturn(pages);
+        ExtractionService service = service(20);
+        String jobId = service.submit("key", pdf(PDF), CONTEXT).jobId();
+
+        scheduled.getFirst().run();
+
+        ExtractionJobResponse job = service.find(jobId).orElseThrow();
+        assertThat(job.status()).isEqualTo(ExtractionStatus.FAILED);
+        assertThat(job.error().code()).isEqualTo(ExtractionError.UNREADABLE_DOCUMENT);
+        assertThat(pages.isClosed()).isTrue();
+        verify(extractor, never()).extract(any(BufferedImage.class), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void process_eachPageRenderedJustBeforeItsExtraction() throws IOException {
+        TestDocumentPages pages = TestDocumentPages.of(3);
+        when(pdfParser.open(PDF)).thenReturn(pages);
+        List<Integer> renderedWhenCalled = new ArrayList<>();
+        when(extractor.extract(any(BufferedImage.class), anyInt(), anyInt(), any())).thenAnswer(invocation -> {
+            renderedWhenCalled.add(pages.renderedPages().size());
+            assertThat((BufferedImage) invocation.getArgument(0)).isSameAs(pages.image((int) invocation.getArgument(1) - 1));
+            return new PageExtraction(invocation.getArgument(1), null, Map.of(), Map.of(), List.of());
+        });
+        ExtractionService service = service(20);
+        service.submit("key", pdf(PDF), CONTEXT);
+
+        scheduled.getFirst().run();
+
+        // page n is rendered only when page n-1 has been extracted: never all pages up front
+        assertThat(renderedWhenCalled).containsExactly(1, 2, 3);
+        assertThat(pages.isClosed()).isTrue();
+    }
+
+    @Test
     void process_tooManyPages_analysesOnlyMaxPages() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(List.of(new byte[]{1}, new byte[]{2}, new byte[]{3}));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(3));
         when(extractor.extract(any(), anyInt(), anyInt(), any()))
                 .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
         ExtractionService service = service(2);
@@ -329,7 +364,8 @@ class ExtractionServiceTest {
 
     @Test
     void process_rendersOnlyTheAnalysedPages() throws IOException {
-        doReturn(new RenderedPages(renderedPages(2), 50)).when(pdfParser).renderPages(PDF, 2);
+        TestDocumentPages pages = TestDocumentPages.of(50);
+        when(pdfParser.open(PDF)).thenReturn(pages);
         when(extractor.extract(any(), anyInt(), anyInt(), any()))
                 .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
         ExtractionService service = service(2);
@@ -337,7 +373,8 @@ class ExtractionServiceTest {
 
         scheduled.getFirst().run();
 
-        verify(pdfParser, never()).renderPages(any());
+        assertThat(pages.renderedPages()).containsExactly(0, 1);
+        assertThat(pages.isClosed()).isTrue();
         verify(extractor, times(2)).extract(any(), anyInt(), eq(50), any());
         assertThat(service.find(jobId).orElseThrow().result().warnings())
                 .contains("Only the first 2 of 50 pages were analysed");
@@ -347,14 +384,6 @@ class ExtractionServiceTest {
 
     private static final ExtractionContext IV_CONTEXT = new ExtractionContext("sumex-invoice", "D_0031", "de",
             Map.of(), List.of("balance.amount", "esr.iban", "services"), null);
-
-    private static List<byte[]> renderedPages(int count) {
-        List<byte[]> pages = new ArrayList<>();
-        for (int i = 1; i <= count; i++) {
-            pages.add(new byte[]{(byte) i});
-        }
-        return pages;
-    }
 
     private static ClassifiedPage classified(int page, DocumentRole role, DocumentType type, String formId) {
         return new ClassifiedPage(new PageClassification(page, role, type, formId, 0.9, null), null, null, false);
@@ -368,7 +397,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_ivDossier_extractsOnlyTheMainDocument_inOneCall() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(4));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(4));
         when(classifier.classify(any(), anyInt(), any(), any())).thenAnswer(invocation -> {
             int page = invocation.<PageImage>getArgument(0).page();
             return page <= 2
@@ -390,14 +419,14 @@ class ExtractionServiceTest {
         assertThat(job.result().warnings()).containsExactly("Pages 1, 2: box of 909.05 left unclear");
         verify(extractor).extract(argThat(images -> images.stream().map(PageImage::page).toList()
                 .equals(List.of(1, 2))), eq(4), any(), eq(true));
-        verify(extractor, never()).extract(any(byte[].class), anyInt(), anyInt(), any());
+        verify(extractor, never()).extract(any(BufferedImage.class), anyInt(), anyInt(), any());
         verify(classifier).classify(argThat(image -> image.page() == 2), eq(4), any(),
                 argThat(known -> known.size() == 1 && known.iterator().next().page() == 1));
     }
 
     @Test
     void process_pageHints_areNotClassifiedAgain() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(3));
         when(classifier.classify(any(), anyInt(), any(), any()))
                 .thenReturn(classified(3, DocumentRole.OTHER, null, null));
         when(extractor.extract(any(), anyInt(), any(), anyBoolean()))
@@ -419,7 +448,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_mainDocumentLargerThanTheLimit_isSentInBatches() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(3));
         when(classifier.classify(any(), anyInt(), any(), any())).thenAnswer(invocation -> classified(
                 invocation.<PageImage>getArgument(0).page(), DocumentRole.MAIN, DocumentType.INVOICE, null));
         when(extractor.extract(argThat(images -> images != null && images.size() == 2), anyInt(), any(),
@@ -437,7 +466,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_classificationFailure_pageIsTreatedAsMainDocument() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(2));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(2));
         when(classifier.classify(argThat(image -> image != null && image.page() == 1), anyInt(), any(), any()))
                 .thenReturn(classified(1, DocumentRole.MAIN, DocumentType.FORM, null));
         when(classifier.classify(argThat(image -> image != null && image.page() == 2), anyInt(), any(), any()))
@@ -454,7 +483,7 @@ class ExtractionServiceTest {
 
     @Test
     void process_extractionOfMainDocumentFails_marksJobFailed() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(1));
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(1));
         when(classifier.classify(any(), anyInt(), any(), any()))
                 .thenReturn(classified(1, DocumentRole.MAIN, DocumentType.FORM, null));
         when(extractor.extract(any(), anyInt(), any(), anyBoolean()))
@@ -468,8 +497,8 @@ class ExtractionServiceTest {
 
     @Test
     void process_profileWithoutClassification_doesNotClassify() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(1));
-        when(extractor.extract(any(byte[].class), anyInt(), anyInt(), any()))
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(1));
+        when(extractor.extract(any(BufferedImage.class), anyInt(), anyInt(), any()))
                 .thenReturn(new PageExtraction(1, null, Map.of(), Map.of(), List.of()));
 
         ExtractionJobResponse job = run(service(20), CONTEXT);
@@ -514,8 +543,8 @@ class ExtractionServiceTest {
      */
     @Test
     void process_perPageProfile_returnsEachPageWithoutMerging() throws IOException {
-        when(pdfParser.renderPages(PDF)).thenReturn(renderedPages(3));
-        when(extractor.extract(any(byte[].class), anyInt(), eq(3), any())).thenAnswer(invocation -> {
+        when(pdfParser.open(PDF)).thenReturn(TestDocumentPages.of(3));
+        when(extractor.extract(any(BufferedImage.class), anyInt(), eq(3), any())).thenAnswer(invocation -> {
             int page = invocation.getArgument(1);
             if (page == 3) {
                 throw new VisionFieldExtractor.PageExtractionException("bad", null);
@@ -538,7 +567,7 @@ class ExtractionServiceTest {
                 "'pageHints' ignored: profile 'gaime-civil-status' extracts each page on its own",
                 "Page 3 could not be analysed by the extraction service",
                 "Page 2: faint mark");
-        verify(extractor, times(3)).extract(any(byte[].class), anyInt(), eq(3), any());
+        verify(extractor, times(3)).extract(any(BufferedImage.class), anyInt(), eq(3), any());
         verifyNoInteractions(classifier);
     }
 }

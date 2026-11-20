@@ -19,6 +19,7 @@ import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.language.TargetLanguage;
 
+import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,6 +31,8 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class TextTranslationServiceTest {
+
+    private static final BufferedImage PAGE = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
 
     @Mock
     private ChatClient llmClient;
@@ -81,7 +84,7 @@ class TextTranslationServiceTest {
     }
 
     @Test
-    void translatePagesSingleStrategy_singlePage_returnsTranslation() {
+    void translatePageSingleStrategy_singlePage_returnsTranslation() {
         stubImagePreprocessor();
         ChatClient.CallResponseSpec callResponseSpec = mock(ChatClient.CallResponseSpec.class);
         when(callResponseSpec.content()).thenReturn("Translated via vision");
@@ -93,7 +96,7 @@ class TextTranslationServiceTest {
         when(visionClient.prompt()).thenReturn(requestSpec);
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
-        List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
+        List<String> result = List.of(service.translatePageSingleStrategy(PAGE, TargetLanguage.FR, true));
 
         assertThat(result).containsExactly("Translated via vision");
     }
@@ -142,7 +145,7 @@ class TextTranslationServiceTest {
     }
 
     @Test
-    void translatePagesSingleStrategy_renderAsMarkdownFalse_doesNotIncludeMarkdownInstructions() {
+    void translatePageSingleStrategy_renderAsMarkdownFalse_doesNotIncludeMarkdownInstructions() {
         stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
@@ -156,7 +159,7 @@ class TextTranslationServiceTest {
         when(visionClient.prompt()).thenReturn(requestSpec);
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
-        List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR, false);
+        List<String> result = List.of(service.translatePageSingleStrategy(PAGE, TargetLanguage.FR, false));
 
         assertThat(result).containsExactly("Plain vision result");
         assertThat(messageCaptor.getValue().getText())
@@ -166,7 +169,7 @@ class TextTranslationServiceTest {
     }
 
     @Test
-    void translatePagesSingleStrategy_renderAsMarkdownTrue_includesMarkdownInstructions() {
+    void translatePageSingleStrategy_renderAsMarkdownTrue_includesMarkdownInstructions() {
         stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
@@ -180,7 +183,7 @@ class TextTranslationServiceTest {
         when(visionClient.prompt()).thenReturn(requestSpec);
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
-        List<String> result = service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR, true);
+        List<String> result = List.of(service.translatePageSingleStrategy(PAGE, TargetLanguage.FR, true));
 
         assertThat(result).containsExactly("# Vision markdown result");
         assertThat(messageCaptor.getValue().getText()).contains("Markdown");
@@ -220,14 +223,14 @@ class TextTranslationServiceTest {
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
-        StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.DE))
+        StepVerifier.create(service.translatePageSingleStrategyStream(PAGE, TargetLanguage.DE))
                 .expectNext("Token1")
                 .expectNext("Token2")
                 .verifyComplete();
     }
 
     @Test
-    void translatePagesSingleStrategy_usesPreprocessedJpegMedia() {
+    void translatePageSingleStrategy_usesPreprocessedJpegMedia() {
         stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
@@ -241,9 +244,9 @@ class TextTranslationServiceTest {
         when(visionClient.prompt()).thenReturn(requestSpec);
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
-        service.translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
+        List.of(service.translatePageSingleStrategy(PAGE, TargetLanguage.FR, true));
 
-        verify(imagePreprocessor).toMedia(any(byte[].class));
+        verify(imagePreprocessor).toMedia(any(BufferedImage.class));
         UserMessage message = (UserMessage) messageCaptor.getValue();
         assertThat(message.getMedia().get(0).getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
     }
@@ -264,18 +267,18 @@ class TextTranslationServiceTest {
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
 
-        StepVerifier.create(service.translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.DE))
+        StepVerifier.create(service.translatePageSingleStrategyStream(PAGE, TargetLanguage.DE))
                 .expectNext("Token1")
                 .verifyComplete();
 
-        verify(imagePreprocessor).toMedia(any(byte[].class));
+        verify(imagePreprocessor).toMedia(any(BufferedImage.class));
         UserMessage message = (UserMessage) messageCaptor.getValue();
         assertThat(message.getMedia().get(0).getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
     }
 
     private void stubImagePreprocessor() {
         Media jpegMedia = new Media(MimeTypeUtils.IMAGE_JPEG, new ByteArrayResource(new byte[]{9, 9, 9}));
-        when(imagePreprocessor.toMedia(any(byte[].class))).thenReturn(jpegMedia);
+        when(imagePreprocessor.toMedia(any(BufferedImage.class))).thenReturn(jpegMedia);
     }
 
     @Test
@@ -363,7 +366,7 @@ class TextTranslationServiceTest {
     }
 
     @Test
-    void translatePagesSingleStrategy_promptNamesTargetLanguageExplicitly() {
+    void translatePageSingleStrategy_promptNamesTargetLanguageExplicitly() {
         stubImagePreprocessor();
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
@@ -377,7 +380,7 @@ class TextTranslationServiceTest {
         when(visionClient.prompt()).thenReturn(requestSpec);
 
         TextTranslationService service = new TextTranslationService(llmClient, visionClient, imagePreprocessor, Optional.empty());
-        service.translatePagesSingleStrategy(List.of(new byte[]{1}), TargetLanguage.IT);
+        List.of(service.translatePageSingleStrategy(PAGE, TargetLanguage.IT, true));
 
         assertThat(messageCaptor.getValue().getText())
                 .contains("translate it into Italian (italiano, ISO 639-1 code \"it\")")
@@ -425,13 +428,13 @@ class TextTranslationServiceTest {
     }
 
     @Test
-    void translatePagesSingleStrategy_toolEnabled_offersAcronymTool() {
+    void translatePageSingleStrategy_toolEnabled_offersAcronymTool() {
         stubImagePreprocessor();
         ChatClient.ChatClientRequestSpec requestSpec = selfReturningCallSpec("Texte");
         when(visionClient.prompt()).thenReturn(requestSpec);
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
-        withTool().translatePagesSingleStrategy(List.of(new byte[]{1, 2, 3}), TargetLanguage.FR);
+        List.of(withTool().translatePageSingleStrategy(PAGE, TargetLanguage.FR, true));
 
         verify(requestSpec).messages(messageCaptor.capture());
         verify(requestSpec).tools(acronymLookupTool);
@@ -473,7 +476,7 @@ class TextTranslationServiceTest {
         ChatClient.ChatClientRequestSpec requestSpec = selfReturningStreamSpec(Flux.just("Token"));
         when(visionClient.prompt()).thenReturn(requestSpec);
 
-        StepVerifier.create(withTool().translatePageSingleStrategyStream(new byte[]{1, 2, 3}, TargetLanguage.IT))
+        StepVerifier.create(withTool().translatePageSingleStrategyStream(PAGE, TargetLanguage.IT))
                 .expectNext("Token")
                 .verifyComplete();
 

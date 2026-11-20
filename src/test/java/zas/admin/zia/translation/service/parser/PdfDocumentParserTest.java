@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 
 import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.OutputStream;
 
 import java.io.ByteArrayOutputStream;
@@ -119,59 +120,94 @@ class PdfDocumentParserTest {
     }
 
     @Test
-    void renderPages_singlePagePdf_returnsOnePageImage() throws IOException {
-        byte[] pdfBytes = createMinimalPdf(1);
-        List<byte[]> pages = parser.renderPages(pdfBytes);
-        assertThat(pages).hasSize(1);
-        assertThat(pages.getFirst()).isNotEmpty();
+    void open_rendersPagesOnDemandAsRgbImages() throws IOException {
+        try (DocumentPages pages = parser.open(createMinimalPdf(3))) {
+            assertThat(pages.pageCount()).isEqualTo(3);
+
+            BufferedImage page = pages.render(2);
+
+            // US Letter (612 x 792 pt) at 150 DPI, no PNG encoding in between; PDFBox truncates 1649.99 to 1649
+            assertThat(page.getType()).isEqualTo(BufferedImage.TYPE_INT_RGB);
+            assertThat(page.getWidth()).isEqualTo(1275);
+            assertThat(page.getHeight()).isEqualTo(1649);
+        }
     }
 
     @Test
-    void renderPages_multiPagePdf_returnsCorrectNumberOfPages() throws IOException {
-        byte[] pdfBytes = createMinimalPdf(3);
-        List<byte[]> pages = parser.renderPages(pdfBytes);
-        assertThat(pages).hasSize(3);
+    void layout_returnsPageSizeInPoints() throws IOException {
+        try (DocumentPages pages = parser.open(createMinimalPdf(2))) {
+            // Default PDPage uses US Letter (612 x 792)
+            assertThat(pages.layout(0)).isEqualTo(new PageLayout(612f, 792f));
+            assertThat(pages.layout(1)).isEqualTo(new PageLayout(612f, 792f));
+        }
     }
 
     @Test
-    void renderPages_withMaxPages_rendersOnlyTheFirstPages() throws IOException {
-        byte[] pdfBytes = createMinimalPdf(5);
-
-        RenderedPages rendered = parser.renderPages(pdfBytes, 2);
-
-        assertThat(rendered.pages()).hasSize(2);
-        assertThat(rendered.pageCount()).isEqualTo(5);
-        assertThat(parser.renderPages(pdfBytes, 10).pages()).hasSize(5);
+    void layout_landscapePage_detectsLandscape() throws IOException {
+        try (DocumentPages pages = parser.open(createLandscapePdf())) {
+            assertThat(pages.layout(0).isLandscape()).isTrue();
+        }
     }
 
     @Test
-    void renderPages_producesValidPngBytes() throws IOException {
-        byte[] pdfBytes = createMinimalPdf(1);
-        List<byte[]> pages = parser.renderPages(pdfBytes);
-        // PNG magic bytes: 89 50 4E 47
-        byte[] pageBytes = pages.getFirst();
-        assertThat(pageBytes[0]).isEqualTo((byte) 0x89);
-        assertThat(pageBytes[1]).isEqualTo((byte) 0x50); // 'P'
-        assertThat(pageBytes[2]).isEqualTo((byte) 0x4E); // 'N'
-        assertThat(pageBytes[3]).isEqualTo((byte) 0x47); // 'G'
+    void layout_usesTheCropBoxLikeTheRenderer() throws IOException {
+        PDPage page = new PDPage(PDRectangle.A4);
+        page.setCropBox(new PDRectangle(50, 50, 495, 742));
+
+        try (DocumentPages pages = parser.open(pdfOf(page))) {
+            BufferedImage rendered = pages.render(0);
+
+            assertThat(pages.layout(0)).isEqualTo(new PageLayout(495f, 742f));
+            // the renderer draws the same crop box: 495 x 742 pt at 150 DPI (PDFBox rounds down)
+            assertThat(rendered.getWidth()).isEqualTo(1031);
+            assertThat(rendered.getHeight()).isEqualTo(1545);
+        }
     }
 
     @Test
-    void extractPageLayouts_returnsCorrectDimensions() throws IOException {
-        byte[] pdfBytes = createMinimalPdf(2);
-        List<PageLayout> layouts = parser.extractPageLayouts(pdfBytes);
-        assertThat(layouts).hasSize(2);
-        // Default PDPage uses US Letter (612 x 792)
-        assertThat(layouts.getFirst().widthPt()).isEqualTo(612f);
-        assertThat(layouts.getFirst().heightPt()).isEqualTo(792f);
+    void layout_rotatedPage_widthAndHeightSwappedLikeTheRenderer() throws IOException {
+        PDPage page = new PDPage(PDRectangle.A4);
+        page.setRotation(90);
+
+        try (DocumentPages pages = parser.open(pdfOf(page))) {
+            PageLayout layout = pages.layout(0);
+            BufferedImage rendered = pages.render(0);
+
+            assertThat(layout.widthPt()).isEqualTo(PDRectangle.A4.getHeight());
+            assertThat(layout.heightPt()).isEqualTo(PDRectangle.A4.getWidth());
+            assertThat(rendered.getWidth()).isGreaterThan(rendered.getHeight());
+        }
     }
 
     @Test
-    void extractPageLayouts_landscapePage_detectsLandscape() throws IOException {
-        byte[] pdfBytes = createLandscapePdf();
-        List<PageLayout> layouts = parser.extractPageLayouts(pdfBytes);
-        assertThat(layouts).hasSize(1);
-        assertThat(layouts.getFirst().isLandscape()).isTrue();
+    void render_concurrentCalls_areSerialized() throws Exception {
+        try (DocumentPages pages = parser.open(createMinimalPdf(4));
+             var executor = java.util.concurrent.Executors.newFixedThreadPool(4)) {
+            List<java.util.concurrent.Future<BufferedImage>> renders = new java.util.ArrayList<>();
+            for (int round = 0; round < 3; round++) {
+                for (int i = 0; i < 4; i++) {
+                    int index = i;
+                    renders.add(executor.submit(() -> pages.render(index)));
+                }
+            }
+            for (var render : renders) {
+                assertThat(render.get().getWidth()).isEqualTo(1275);
+            }
+        }
+    }
+
+    @Test
+    void open_unreadableBytes_throwsIOException() {
+        assertThatThrownBy(() -> parser.open("%PDF-1.7 truncated".getBytes())).isInstanceOf(IOException.class);
+    }
+
+    private static byte[] pdfOf(PDPage page) throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(page);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
     }
 
     private static byte[] createMinimalPdf(int pageCount) throws IOException {

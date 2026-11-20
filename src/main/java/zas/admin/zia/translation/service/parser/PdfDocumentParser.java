@@ -17,11 +17,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import zas.admin.zia.translation.service.InvalidDocumentException;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -39,28 +36,8 @@ class PdfDocumentParser implements DocumentParser {
     private final AtomicLong jpxRejections = new AtomicLong();
 
     @Override
-    public List<byte[]> renderPages(byte[] documentBytes) throws IOException {
-        return renderPages(documentBytes, Integer.MAX_VALUE).pages();
-    }
-
-    @Override
-    public RenderedPages renderPages(byte[] documentBytes, int maxPages) throws IOException {
-        try (PDDocument document = Loader.loadPDF(documentBytes)) {
-            PDFRenderer renderer = new PDFRenderer(document);
-            int pageCount = document.getNumberOfPages();
-            int toRender = Math.clamp(maxPages, 0, pageCount);
-            List<byte[]> pages = new ArrayList<>(toRender);
-            for (int i = 0; i < toRender; i++) {
-                BufferedImage image = renderer.renderImageWithDPI(i, RENDER_DPI);
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                boolean written = ImageIO.write(image, "png", out);
-                if (!written) {
-                    throw new IOException("No suitable ImageIO writer found for PNG rendering on page " + (i + 1));
-                }
-                pages.add(out.toByteArray());
-            }
-            return new RenderedPages(pages, pageCount);
-        }
+    public DocumentPages open(byte[] documentBytes) throws IOException {
+        return new PdfPages(Loader.loadPDF(documentBytes));
     }
 
     @Override
@@ -142,16 +119,40 @@ class PdfDocumentParser implements DocumentParser {
         return COSName.JPX_DECODE.equals(filter);
     }
 
-    @Override
-    public List<PageLayout> extractPageLayouts(byte[] documentBytes) throws IOException {
-        try (PDDocument document = Loader.loadPDF(documentBytes)) {
-            int pageCount = document.getNumberOfPages();
-            List<PageLayout> layouts = new ArrayList<>(pageCount);
-            for (int i = 0; i < pageCount; i++) {
-                PDRectangle mediaBox = document.getPage(i).getMediaBox();
-                layouts.add(new PageLayout(mediaBox.getWidth(), mediaBox.getHeight()));
-            }
-            return layouts;
+    /** A loaded PDF; pages rendered at {@value #RENDER_DPI} DPI on demand. */
+    private static final class PdfPages implements DocumentPages {
+
+        private final PDDocument document;
+        private final PDFRenderer renderer;
+
+        PdfPages(PDDocument document) {
+            this.document = document;
+            this.renderer = new PDFRenderer(document);
+        }
+
+        @Override
+        public int pageCount() {
+            return document.getNumberOfPages();
+        }
+
+        @Override
+        public synchronized PageLayout layout(int index) {
+            PDPage page = document.getPage(index);
+            PDRectangle cropBox = page.getCropBox();
+            boolean quarterTurn = Math.floorMod(page.getRotation(), 180) == 90;
+            return quarterTurn
+                    ? new PageLayout(cropBox.getHeight(), cropBox.getWidth())
+                    : new PageLayout(cropBox.getWidth(), cropBox.getHeight());
+        }
+
+        @Override
+        public synchronized BufferedImage render(int index) throws IOException {
+            return renderer.renderImageWithDPI(index, RENDER_DPI);
+        }
+
+        @Override
+        public synchronized void close() throws IOException {
+            document.close();
         }
     }
 }

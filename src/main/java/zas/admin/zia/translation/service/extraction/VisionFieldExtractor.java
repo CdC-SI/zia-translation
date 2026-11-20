@@ -17,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
+import java.awt.image.BufferedImage;
 import java.util.*;
 
 import static zas.admin.zia.translation.service.extraction.ExtractionSchemaGenerator.*;
@@ -114,7 +115,7 @@ class VisionFieldExtractor {
      *
      * @throws PageExtractionException when the model cannot be called or its answer is not a JSON object
      */
-    PageExtraction extract(byte[] pageImage, int page, int pageCount, ExtractionRequest request) {
+    PageExtraction extract(BufferedImage pageImage, int page, int pageCount, ExtractionRequest request) {
         return extract(List.of(new PageImage(page, pageImage)), pageCount, request, false);
     }
 

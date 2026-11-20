@@ -13,9 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -75,7 +73,7 @@ class PageClassifierTest {
                  "printedPageNumber": 2, "printedPageCount": 2, "continuesPreviousPage": true,
                  "documentRole": "MAIN", "documentType": "FORM", "evidence": "Seite 2 von 2", "confidence": 0.9}""";
 
-        ClassifiedPage result = classifier("json_schema").classify(new PageImage(2, pngImage()), 8, REQUEST,
+        ClassifiedPage result = classifier("json_schema").classify(new PageImage(2, pageImage()), 8, REQUEST,
                 List.of(new PageClassification(1, DocumentRole.MAIN, DocumentType.FORM, "300.001", null, null)));
 
         assertThat(result.classification()).isEqualTo(new PageClassification(2, DocumentRole.MAIN, DocumentType.FORM,
@@ -103,7 +101,7 @@ class PageClassifierTest {
         status = 500;
         answerContent = "{}";
         PageClassifier classifier = classifier("json_schema");
-        PageImage page = new PageImage(1, pngImage());
+        PageImage page = new PageImage(1, pageImage());
 
         assertThatThrownBy(() -> classifier.classify(page, 1, REQUEST, List.of()))
                 .isInstanceOf(PageClassifier.PageClassificationException.class);
@@ -176,9 +174,7 @@ class PageClassifierTest {
         return new PageClassifier(client, new VisionImagePreprocessor(256, 0.75f), MAPPER, responseFormat);
     }
 
-    private static byte[] pngImage() throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ImageIO.write(new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB), "png", output);
-        return output.toByteArray();
+    private static BufferedImage pageImage() {
+        return new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB);
     }
 }

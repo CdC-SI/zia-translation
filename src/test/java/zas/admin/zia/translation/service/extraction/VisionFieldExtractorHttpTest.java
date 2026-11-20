@@ -12,9 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -73,7 +71,7 @@ class VisionFieldExtractorHttpTest {
         ExtractionRequest request = new ExtractionRequest(null, null, "doc-1", "de", Map.of(), null,
                 List.of(new FieldDefinition("invoice.date", FieldType.DATE, "Invoice date", null)), List.of(), List.of());
 
-        PageExtraction page = extractor.extract(pngImage(), 1, 1, request);
+        PageExtraction page = extractor.extract(pageImage(), 1, 1, request);
 
         JsonNode sent = MAPPER.readTree(requestBody.get());
         assertThat(sent.get("model").asString()).isEqualTo("vision-model");
@@ -98,7 +96,7 @@ class VisionFieldExtractorHttpTest {
         ExtractionRequest request = new ExtractionRequest(null, null, "doc-1", null, Map.of(), null,
                 List.of(FieldDefinition.adHoc("name")), List.of(), List.of());
 
-        extractor.extract(pngImage(), 1, 1, request);
+        extractor.extract(pageImage(), 1, 1, request);
 
         JsonNode sent = MAPPER.readTree(requestBody.get());
         assertThat(sent.get("model").asString()).isEqualTo("vision-model");
@@ -116,7 +114,7 @@ class VisionFieldExtractorHttpTest {
                 List.of(new FieldDefinition("invoice.date", FieldType.DATE, "Invoice date", null)), List.of(), List.of());
 
         PageExtraction extraction = extractor.extract(
-                List.of(new PageImage(2, pngImage()), new PageImage(3, pngImage())), 5, request, true);
+                List.of(new PageImage(2, pageImage()), new PageImage(3, pageImage())), 5, request, true);
 
         JsonNode sent = MAPPER.readTree(requestBody.get());
         JsonNode messages = sent.get("messages");
@@ -142,9 +140,7 @@ class VisionFieldExtractorHttpTest {
                 new ConfidenceCalculator(0.3, 0.5), responseFormat);
     }
 
-    private static byte[] pngImage() throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ImageIO.write(new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB), "png", output);
-        return output.toByteArray();
+    private static BufferedImage pageImage() {
+        return new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB);
     }
 }

@@ -9,12 +9,13 @@ import javax.imageio.ImageWriteParam;
 import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageOutputStream;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.zip.CRC32;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,71 +40,55 @@ class ImageDocumentParserTest {
     }
 
     @Test
-    void renderPages_validPng_returnsOnePngPage() throws IOException {
-        byte[] pngBytes = createImageBytes("png", 32, 16);
-
-        var pages = parser.renderPages(pngBytes);
-
-        assertThat(pages).hasSize(1);
-        assertThat(pages.getFirst()).startsWith((byte) 0x89, (byte) 0x50, (byte) 0x4E, (byte) 0x47);
+    void open_png_onePageRenderedAsRgb() throws IOException {
+        try (DocumentPages pages = parser.open(createImageBytes("png", 32, 16))) {
+            assertThat(pages.pageCount()).isEqualTo(1);
+            BufferedImage page = pages.render(0);
+            assertThat(page.getType()).isEqualTo(BufferedImage.TYPE_INT_RGB);
+            assertThat(page.getWidth()).isEqualTo(32);
+            assertThat(page.getHeight()).isEqualTo(16);
+        }
     }
 
     @Test
-    void renderPages_validJpeg_convertsToPng() throws IOException {
-        byte[] jpegBytes = createImageBytes("jpeg", 32, 16);
-
-        var pages = parser.renderPages(jpegBytes);
-
-        assertThat(pages).hasSize(1);
-        assertThat(pages.getFirst()).startsWith((byte) 0x89, (byte) 0x50, (byte) 0x4E, (byte) 0x47);
+    void open_jpeg_onePage() throws IOException {
+        assertThat(renderAll(createImageBytes("jpeg", 32, 16))).hasSize(1);
     }
 
     @Test
-    void renderPages_invalidBytes_throwsIOException() {
-        byte[] invalidBytes = {1, 2, 3, 4};
-
-        assertThatThrownBy(() -> parser.renderPages(invalidBytes))
+    void open_invalidBytes_throwsIOException() {
+        assertThatThrownBy(() -> parser.open(new byte[]{1, 2, 3, 4}))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("Unable to read image");
     }
 
     @Test
-    void extractPageLayouts_returnsCorrectDimensions() throws IOException {
-        byte[] pngBytes = createImageBytes("png", 200, 100);
-
-        var layouts = parser.extractPageLayouts(pngBytes);
-
-        assertThat(layouts).containsExactly(new PageLayout(200f, 100f));
+    void layout_returnsPixelDimensions() throws IOException {
+        try (DocumentPages pages = parser.open(createImageBytes("png", 200, 100))) {
+            assertThat(pages.layout(0)).isEqualTo(new PageLayout(200f, 100f));
+        }
     }
 
     @Test
-    void extractPageLayouts_invalidBytes_throwsIOException() {
-        byte[] invalidBytes = {9, 8, 7, 6};
-
-        assertThatThrownBy(() -> parser.extractPageLayouts(invalidBytes))
-                .isInstanceOf(IOException.class)
-                .hasMessageContaining("Unable to read image");
-    }
-
-    @Test
-    void renderPages_multiPageTiff_returnsOnePagePerFrame() throws IOException {
+    void render_multiPageTiff_returnsOnePagePerFrame() throws IOException {
         byte[] tiff = createMultiPageTiff(3, 40, 20);
 
-        assertThat(parser.renderPages(tiff)).hasSize(3);
-        assertThat(parser.extractPageLayouts(tiff)).containsExactly(
-                new PageLayout(40f, 20f), new PageLayout(40f, 20f), new PageLayout(40f, 20f));
+        assertThat(renderAll(tiff)).hasSize(3);
+        try (DocumentPages pages = parser.open(tiff)) {
+            assertThat(List.of(pages.layout(0), pages.layout(1), pages.layout(2))).containsOnly(new PageLayout(40f, 20f));
+        }
     }
 
     @Test
-    void renderPages_webp_returnsOnePngPage() throws IOException {
-        var pages = parser.renderPages(WEBP_1X1);
+    void render_webp_returnsOnePngPage() throws IOException {
+        var pages = renderAll(WEBP_1X1);
 
         assertThat(pages).hasSize(1);
-        assertThat(decode(pages.getFirst()).getWidth()).isEqualTo(1);
+        assertThat(pages.getFirst().getWidth()).isEqualTo(1);
     }
 
     @Test
-    void renderPages_cmykJpeg_convertedToRgbWithCorrectColours() throws IOException {
+    void render_cmykJpeg_convertedToRgbWithCorrectColours() throws IOException {
         // Adobe CMYK JPEG (APP14, inverted values) of pure red, as written by scanners/Photoshop:
         // the JDK decodes it, but could not encode the CMYK result as PNG before the RGB conversion
         byte[] cmyk;
@@ -111,16 +96,14 @@ class ImageDocumentParserTest {
             cmyk = in.readAllBytes();
         }
 
-        var pages = parser.renderPages(cmyk);
-
-        int rgb = decode(pages.getFirst()).getRGB(8, 8);
+        int rgb = renderAll(cmyk).getFirst().getRGB(8, 8);
         assertThat((rgb >> 16) & 0xFF).isGreaterThan(230);
         assertThat((rgb >> 8) & 0xFF).isLessThan(25);
         assertThat(rgb & 0xFF).isLessThan(25);
     }
 
     @Test
-    void renderPages_transparentPng_flattenedOnWhite() throws IOException {
+    void render_transparentPng_flattenedOnWhite() throws IOException {
         BufferedImage transparent = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
         byte[] png;
         try (var out = new ByteArrayOutputStream()) {
@@ -128,7 +111,7 @@ class ImageDocumentParserTest {
             png = out.toByteArray();
         }
 
-        assertThat(decode(parser.renderPages(png).getFirst()).getRGB(1, 1) & 0xFFFFFF).isEqualTo(0xFFFFFF);
+        assertThat(renderAll(png).getFirst().getRGB(1, 1) & 0xFFFFFF).isEqualTo(0xFFFFFF);
     }
 
     @Test
@@ -138,7 +121,7 @@ class ImageDocumentParserTest {
         assertThatThrownBy(() -> parser.validate(bomb))
                 .isInstanceOf(InvalidDocumentException.class)
                 .hasMessageContaining("Image too large: 10000 megapixels (maximum 50 megapixels)");
-        assertThatThrownBy(() -> parser.renderPages(bomb)).isInstanceOf(InvalidDocumentException.class);
+        assertThatThrownBy(() -> renderAll(bomb)).isInstanceOf(InvalidDocumentException.class);
     }
 
     @Test
@@ -156,8 +139,14 @@ class ImageDocumentParserTest {
         assertThatThrownBy(() -> new ImageDocumentParser(0)).isInstanceOf(IllegalArgumentException.class);
     }
 
-    private static BufferedImage decode(byte[] bytes) throws IOException {
-        return ImageIO.read(new ByteArrayInputStream(bytes));
+    private List<BufferedImage> renderAll(byte[] bytes) throws IOException {
+        try (DocumentPages pages = parser.open(bytes)) {
+            List<BufferedImage> images = new ArrayList<>();
+            for (int i = 0; i < pages.pageCount(); i++) {
+                images.add(pages.render(i));
+            }
+            return images;
+        }
     }
 
     /** A valid 1x1 PNG whose IHDR header is rewritten to declare another size (CRC recomputed). */

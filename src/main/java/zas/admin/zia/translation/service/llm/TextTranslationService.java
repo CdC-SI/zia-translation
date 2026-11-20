@@ -14,6 +14,7 @@ import zas.admin.zia.translation.service.glossary.AcronymLookupTool;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.language.TargetLanguage;
 
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -104,30 +105,32 @@ public class TextTranslationService {
     }
 
     public List<String> translatePages(List<String> extractedPages, TargetLanguage targetLanguage, boolean renderAsMarkdown) {
-        String template = renderAsMarkdown ? TRANSLATE_PROMPT_TEMPLATE : TRANSLATE_PLAIN_PROMPT_TEMPLATE;
-        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
         List<String> translated = new ArrayList<>(extractedPages.size());
         for (String pageText : extractedPages) {
-            String result = call(llmClient, buildPrompt(template, targetLanguage, pageText), null, toolLanguage);
-            translated.add(result != null ? result : "");
+            translated.add(translatePage(pageText, targetLanguage, renderAsMarkdown));
         }
         return translated;
     }
 
-    public List<String> translatePagesSingleStrategy(List<byte[]> pageImages, TargetLanguage targetLanguage) {
-        return translatePagesSingleStrategy(pageImages, targetLanguage, true);
+    /**
+     * Translates the text of one page (OCR output of the TWO-step strategy) in one blocking LLM call.
+     */
+    public String translatePage(String extractedText, TargetLanguage targetLanguage, boolean renderAsMarkdown) {
+        String template = renderAsMarkdown ? TRANSLATE_PROMPT_TEMPLATE : TRANSLATE_PLAIN_PROMPT_TEMPLATE;
+        String result = call(llmClient, buildPrompt(template, targetLanguage, extractedText), null,
+                acronymToolLanguage(targetLanguage));
+        return result != null ? result : "";
     }
 
-    public List<String> translatePagesSingleStrategy(List<byte[]> pageImages, TargetLanguage targetLanguage, boolean renderAsMarkdown) {
+    /**
+     * Translates one rendered page image directly with the vision model (single strategy), in one blocking call.
+     */
+    public String translatePageSingleStrategy(BufferedImage pageImage, TargetLanguage targetLanguage, boolean renderAsMarkdown) {
         String promptTemplate = renderAsMarkdown ? SINGLE_STRATEGY_PROMPT_TEMPLATE : SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE;
-        Optional<String> toolLanguage = acronymToolLanguage(targetLanguage);
-        List<String> translated = new ArrayList<>(pageImages.size());
-        for (byte[] imageBytes : pageImages) {
-            Media media = imagePreprocessor.toMedia(imageBytes);
-            String result = call(visionClient, buildPrompt(promptTemplate, targetLanguage, ""), media, toolLanguage);
-            translated.add(result != null ? result : "");
-        }
-        return translated;
+        Media media = imagePreprocessor.toMedia(pageImage);
+        String result = call(visionClient, buildPrompt(promptTemplate, targetLanguage, ""), media,
+                acronymToolLanguage(targetLanguage));
+        return result != null ? result : "";
     }
 
     /**
@@ -150,8 +153,8 @@ public class TextTranslationService {
     /**
      * Streams the translation of a single image page (single strategy) token-by-token.
      */
-    public Flux<String> translatePageSingleStrategyStream(byte[] imageBytes, TargetLanguage targetLanguage) {
-        Media media = imagePreprocessor.toMedia(imageBytes);
+    public Flux<String> translatePageSingleStrategyStream(BufferedImage pageImage, TargetLanguage targetLanguage) {
+        Media media = imagePreprocessor.toMedia(pageImage);
         return stream(visionClient, buildPrompt(SINGLE_STRATEGY_PLAIN_PROMPT_TEMPLATE, targetLanguage, ""), media,
                 acronymToolLanguage(targetLanguage));
     }

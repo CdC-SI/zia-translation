@@ -8,10 +8,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.parser.DocumentPages;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.DocumentParserResolver;
-import zas.admin.zia.translation.service.parser.RenderedPages;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.Executor;
@@ -120,20 +121,34 @@ public class ExtractionService {
     }
 
     private ExtractionResponse extract(byte[] document, DocumentParser parser, ExtractionRequest request) {
+        DocumentPages pages = openPages(document, parser);
+        try {
+            return extract(pages, request);
+        } finally {
+            closeQuietly(pages);
+        }
+    }
+
+    private ExtractionResponse extract(DocumentPages pages, ExtractionRequest request) {
         List<String> warnings = new ArrayList<>(request.warnings());
-        RenderedPages rendered = renderPages(document, parser, warnings);
-        List<byte[]> pages = rendered.pages();
-        int pageCount = rendered.pageCount();
+        int pageCount = pages.pageCount();
+        int analysed = Math.clamp(maxPages, 0, pageCount);
+        if (analysed == 0) {
+            throw new UnreadableDocumentException("The document has no page.", null);
+        }
+        if (pageCount > analysed) {
+            warnings.add("Only the first %d of %d pages were analysed".formatted(analysed, pageCount));
+        }
         if (request.classifiesPages()) {
-            return extractMainDocument(pages, pageCount, request, warnings);
+            return extractMainDocument(pages, analysed, pageCount, request, warnings);
         }
 
-        List<PageExtraction> extractions = new ArrayList<>(pages.size());
+        List<PageExtraction> extractions = new ArrayList<>(analysed);
         RuntimeException lastFailure = null;
-        for (int index = 0; index < pages.size(); index++) {
-            int page = index + 1;
+        for (int page = 1; page <= analysed; page++) {
+            BufferedImage image = render(pages, page);   // outside the try: an unreadable page fails the job
             try {
-                extractions.add(fieldExtractor.extract(pages.get(index), page, pageCount, request));
+                extractions.add(fieldExtractor.extract(image, page, pageCount, request));
             } catch (RuntimeException ex) {
                 log.warn("Extraction of page {} failed", page, ex);
                 warnings.add("Page %d could not be analysed by the extraction service".formatted(page));
@@ -203,31 +218,37 @@ public class ExtractionService {
         return simplified;
     }
 
-    /** Renders the analysed pages, with a warning when the document has more pages than analysed. */
-    private RenderedPages renderPages(byte[] document, DocumentParser parser, List<String> warnings) {
-        RenderedPages rendered;
+    private static DocumentPages openPages(byte[] document, DocumentParser parser) {
         try {
-            rendered = parser.renderPages(document, maxPages);
+            return parser.open(document);
         } catch (IOException | RuntimeException ex) {
             throw new UnreadableDocumentException("The document cannot be read.", ex);
         }
-        if (rendered.pages().isEmpty()) {
-            throw new UnreadableDocumentException("The document has no page.", null);
+    }
+
+    /** Renders one page (from 1) on demand: pages are not kept in memory between the classification and extraction. */
+    private static BufferedImage render(DocumentPages pages, int page) {
+        try {
+            return pages.render(page - 1);
+        } catch (IOException | RuntimeException ex) {
+            throw new UnreadableDocumentException("The document cannot be read.", ex);
         }
-        if (rendered.pageCount() > rendered.pages().size()) {
-            warnings.add("Only the first %d of %d pages were analysed"
-                    .formatted(rendered.pages().size(), rendered.pageCount()));
+    }
+
+    private static void closeQuietly(DocumentPages pages) {
+        try {
+            pages.close();
+        } catch (IOException ex) {
+            log.warn("Unable to close the document", ex);
         }
-        return rendered;
     }
 
     /**
      * Classifies the pages (hints of the client, then the vision model for the other pages) and extracts the values
      * from the main document only, its pages being sent together.
      */
-    private ExtractionResponse extractMainDocument(List<byte[]> images, int pageCount, ExtractionRequest request,
-                                                   List<String> warnings) {
-        int analysed = images.size();
+    private ExtractionResponse extractMainDocument(DocumentPages pages, int analysed, int pageCount,
+                                                   ExtractionRequest request, List<String> warnings) {
         Map<Integer, PageClassification> hints = new TreeMap<>();
         for (PageClassification hint : request.pageHints()) {
             if (hint.page() <= analysed) {
@@ -245,9 +266,9 @@ public class ExtractionService {
             }
             int current = page;
             List<PageClassification> context = known.values().stream().filter(p -> p.page() != current).toList();
+            PageImage image = new PageImage(page, render(pages, page));
             try {
-                ClassifiedPage result = pageClassifier.classify(
-                        new PageImage(page, images.get(page - 1)), pageCount, request, context);
+                ClassifiedPage result = pageClassifier.classify(image, pageCount, request, context);
                 classified.put(page, result);
                 known.put(page, result.classification());
             } catch (RuntimeException ex) {
@@ -268,7 +289,7 @@ public class ExtractionService {
         for (int from = 0; from < toExtract.size(); from += maxImagesPerCall) {
             List<Integer> batch = toExtract.subList(from, Math.min(from + maxImagesPerCall, toExtract.size()));
             List<PageImage> batchImages = batch.stream()
-                    .map(page -> new PageImage(page, images.get(page - 1)))
+                    .map(page -> new PageImage(page, render(pages, page)))
                     .toList();
             try {
                 extractions.add(fieldExtractor.extract(batchImages, pageCount, request, true));

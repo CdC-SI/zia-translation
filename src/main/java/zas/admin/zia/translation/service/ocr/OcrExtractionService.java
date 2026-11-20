@@ -7,8 +7,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.awt.image.BufferedImage;
 
 @Service
 public class OcrExtractionService {
@@ -29,20 +28,19 @@ public class OcrExtractionService {
         this.imagePreprocessor = imagePreprocessor;
     }
 
-    public List<String> extractText(List<byte[]> pageImages) {
-        List<String> extracted = new ArrayList<>(pageImages.size());
-        for (byte[] imageBytes : pageImages) {
-            Media media = imagePreprocessor.toMedia(imageBytes);
-            UserMessage message = UserMessage.builder()
-                    .text(OCR_PROMPT)
-                    .media(media)
-                    .build();
-            String text = visionClient.prompt()
-                    .messages(message)
-                    .call()
-                    .content();
-            extracted.add(text != null ? text : "");
-        }
-        return extracted;
+    /**
+     * Extracts the text of one rendered page with the vision model.
+     */
+    public String extractText(BufferedImage pageImage) {
+        Media media = imagePreprocessor.toMedia(pageImage);
+        UserMessage message = UserMessage.builder()
+                .text(OCR_PROMPT)
+                .media(media)
+                .build();
+        String text = visionClient.prompt()
+                .messages(message)
+                .call()
+                .content();
+        return text != null ? text : "";
     }
 }
