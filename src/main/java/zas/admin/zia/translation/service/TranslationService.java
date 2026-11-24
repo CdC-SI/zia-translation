@@ -4,10 +4,17 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
@@ -64,6 +71,7 @@ public class TranslationService {
     private final TranslationStrategy defaultStrategy;
     private final long maxFileSizeBytes;
     private final int maxTextLength;
+    private final int pagesInFlight;
 
     TranslationService(
             List<DocumentParser> parsers,
@@ -77,7 +85,11 @@ public class TranslationService {
             @Qualifier("translationTaskExecutor") Executor translationTaskExecutor,
             @Value("${zia.translation.strategy}") String strategy,
             @Value("${zia.translation.pdf.max-file-size}") String maxFileSize,
-            @Value("${zia.translation.text.max-length}") int maxTextLength) {
+            @Value("${zia.translation.text.max-length}") int maxTextLength,
+            @Value("${zia.translation.pages-in-flight:4}") int pagesInFlight) {
+        if (pagesInFlight < 1) {
+            throw new IllegalArgumentException("zia.translation.pages-in-flight must be >= 1");
+        }
 
         this.parserResolver = new DocumentParserResolver(parsers);
         this.ocrService = ocrService;
@@ -92,6 +104,7 @@ public class TranslationService {
         this.defaultStrategy = TranslationStrategy.fromString(strategy);
         this.maxFileSizeBytes = parseSize(maxFileSize);
         this.maxTextLength = maxTextLength;
+        this.pagesInFlight = pagesInFlight;
     }
 
     public TranslationJobResponse submitPdfTranslation(MultipartFile file, String targetLanguage, TranslationStrategy strategy) throws IOException {
@@ -159,8 +172,10 @@ public class TranslationService {
         // the document is opened once and closed when the stream completes, fails or is cancelled
         return Flux.usingWhen(
                 Mono.fromCallable(() -> openPages(file)).subscribeOn(translationScheduler),
+                // up to pages-in-flight pages translated at once; their events are still emitted page after page
                 pages -> Flux.range(0, pages.pageCount())
-                        .concatMap(index -> streamPageTranslation(pages, index, language, resolvedStrategy)),
+                        .flatMapSequential(index -> streamPageTranslation(pages, index, language, resolvedStrategy),
+                                pagesInFlight),
                 pages -> Mono.fromRunnable(() -> closeQuietly(pages)));
     }
 
@@ -171,11 +186,11 @@ public class TranslationService {
             if (strategy == TranslationStrategy.SINGLE) {
                 tokenStream = Mono.fromCallable(() ->
                                 textTranslationService.translatePageSingleStrategyStream(renderPage(pages, index), targetLanguage))
-                        .subscribeOn(translationScheduler)
+                        .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(stream -> stream);
             } else {
                 tokenStream = Mono.fromCallable(() -> ocrService.extractText(renderPage(pages, index)))
-                        .subscribeOn(translationScheduler)
+                        .subscribeOn(Schedulers.boundedElastic())
                         .flatMapMany(extractedText -> textTranslationService.translatePageStream(extractedText, targetLanguage));
             }
 
@@ -258,16 +273,50 @@ public class TranslationService {
     }
 
     /**
-     * Translates the pages one after another; each page is rendered just before its model call and dropped after it,
-     * so at most one page image is in memory.
+     * Translates up to {@code pagesInFlight} pages at the same time, on virtual threads (never on the job pool: a job
+     * waiting for page tasks queued behind other jobs would deadlock). Each page is rendered just before its model
+     * call, so at most {@code pagesInFlight} page images are in memory. The model server load is capped across all
+     * jobs by the ConcurrencyLimitAdvisor of the chat clients.
+     * <p>
+     * The first failing page fails the whole document: no page is started after it, the running ones are
+     * interrupted, and the method returns only once they have all stopped (no model call outlives the job).
      */
     private List<String> translatePages(DocumentPages pages, TargetLanguage targetLanguage, boolean renderAsMarkdown, TranslationStrategy strategy) {
-        List<String> translated = new ArrayList<>(pages.pageCount());
-        for (int index = 0; index < pages.pageCount(); index++) {
-            BufferedImage page = renderPage(pages, index);
-            translated.add(translatePage(page, targetLanguage, renderAsMarkdown, strategy));
+        int pageCount = pages.pageCount();
+        String[] translated = new String[pageCount];
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Semaphore slots = new Semaphore(pagesInFlight);
+        List<Future<?>> tasks = new CopyOnWriteArrayList<>();
+        try (ExecutorService pageExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int index = 0; index < pageCount && failure.get() == null; index++) {
+                slots.acquireUninterruptibly();
+                int page = index;
+                tasks.add(pageExecutor.submit(() -> {
+                    try {
+                        if (failure.get() == null) {
+                            translated[page] = translatePage(renderPage(pages, page), targetLanguage, renderAsMarkdown, strategy);
+                        }
+                    } catch (Throwable pageFailure) {
+                        if (failure.compareAndSet(null, pageFailure)) {
+                            tasks.forEach(task -> task.cancel(true));
+                        }
+                    } finally {
+                        slots.release();
+                    }
+                }));
+            }
+        }   // close() waits for every page task to end
+        Throwable firstFailure = failure.get();
+        if (firstFailure instanceof RuntimeException runtimeException) {
+            throw runtimeException;
         }
-        return translated;
+        if (firstFailure instanceof Error error) {
+            throw error;
+        }
+        if (firstFailure != null) {
+            throw new TranslationProcessingException("Failed to process document translation.", firstFailure);
+        }
+        return new ArrayList<>(Arrays.asList(translated));
     }
 
     private String translatePage(BufferedImage page, TargetLanguage targetLanguage, boolean renderAsMarkdown, TranslationStrategy strategy) {

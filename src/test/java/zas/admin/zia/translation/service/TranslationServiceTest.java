@@ -6,7 +6,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
+import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.image.ImagePreprocessingException;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
@@ -26,6 +28,7 @@ import zas.admin.zia.translation.service.storage.PdfStorageService;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -80,12 +83,12 @@ class TranslationServiceTest {
         dualService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "dual", "10MB", 20000);
+                "dual", "10MB", 20000, 1);
 
         singleService = new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "single", "10MB", 20000);
+                "single", "10MB", 20000, 1);
     }
 
     // --- validation ---
@@ -111,7 +114,7 @@ class TranslationServiceTest {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "dual", "1KB", 20000);
+                "dual", "1KB", 20000, 1);
         byte[] bigContent = new byte[2048];
         bigContent[0] = '%'; bigContent[1] = 'P'; bigContent[2] = 'D'; bigContent[3] = 'F';
         MockMultipartFile file = new MockMultipartFile("file", "big.pdf", "application/pdf", bigContent);
@@ -352,7 +355,7 @@ class TranslationServiceTest {
         TranslationService service = new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "dual", "10MB", 10);
+                "dual", "10MB", 10, 1);
 
         assertThatThrownBy(() -> service.translatePlainText("This text is way too long", "fr"))
                 .isInstanceOf(InvalidDocumentException.class)
@@ -457,7 +460,7 @@ class TranslationServiceTest {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "invalid-strategy", "10MB", 20000))
+                "invalid-strategy", "10MB", 20000, 1))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("invalid-strategy");
     }
@@ -568,7 +571,7 @@ class TranslationServiceTest {
         return new TranslationService(
                 List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), executor,
-                "dual", "10MB", 20000);
+                "dual", "10MB", 20000, 1);
     }
 
     private static Executor rejectingExecutor() {
@@ -688,6 +691,115 @@ class TranslationServiceTest {
         assertThat(pages.isClosed()).isTrue();
     }
 
+    // --- parallel pages (zia.translation.pages-in-flight) ---
+
+    private TranslationService parallelService(String strategy, int pagesInFlight) {
+        return new TranslationService(
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
+                strategy, "10MB", 20000, pagesInFlight);
+    }
+
+    /** Page number (from 1) of a TestDocumentPages image: each page image holds its number in its single pixel. */
+    private static int pageOf(Object image) {
+        return ((java.awt.image.BufferedImage) image).getRGB(0, 0) & 0xFFFFFF;
+    }
+
+    @Test
+    void translatePages_parallel_keepsPageOrderAndNeverExceedsPagesInFlight() throws IOException {
+        TestDocumentPages pages = TestDocumentPages.of(10);
+        when(pdfParser.open(any())).thenReturn(pages);
+        AtomicInteger inProgress = new AtomicInteger();
+        AtomicInteger maxInProgress = new AtomicInteger();
+        when(textTranslationService.translatePageSingleStrategy(any(), any(TargetLanguage.class), eq(false))).thenAnswer(invocation -> {
+            maxInProgress.accumulateAndGet(inProgress.incrementAndGet(), Math::max);
+            int page = pageOf(invocation.getArgument(0));
+            Thread.sleep(10 + (page * 7) % 30);   // pages finish out of order
+            inProgress.decrementAndGet();
+            return "page-" + page;
+        });
+
+        List<String> result = parallelService("single", 4).translateToText(
+                new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES), "fr");
+
+        assertThat(result).containsExactly("page-1", "page-2", "page-3", "page-4", "page-5",
+                "page-6", "page-7", "page-8", "page-9", "page-10");
+        assertThat(maxInProgress.get()).isEqualTo(4);
+        assertThat(pages.renderedPages()).containsExactlyInAnyOrder(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        assertThat(pages.isClosed()).isTrue();
+    }
+
+    @Test
+    void translatePages_parallelDualStrategy_eachPageOcrThenTranslate() throws IOException {
+        when(pdfParser.open(any())).thenReturn(TestDocumentPages.of(6));
+        when(ocrService.extractText(any())).thenAnswer(invocation -> "text-" + pageOf(invocation.getArgument(0)));
+        when(textTranslationService.translatePage(any(), any(TargetLanguage.class), eq(false)))
+                .thenAnswer(invocation -> "T(" + invocation.getArgument(0) + ")");
+
+        List<String> result = parallelService("dual", 3).translateToText(
+                new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES), "fr");
+
+        assertThat(result).containsExactly("T(text-1)", "T(text-2)", "T(text-3)", "T(text-4)", "T(text-5)", "T(text-6)");
+    }
+
+    @Test
+    void translatePages_failingPage_failsTheDocumentAndStopsTheOtherPages() throws IOException {
+        TestDocumentPages pages = TestDocumentPages.of(20);
+        when(pdfParser.open(any())).thenReturn(pages);
+        AtomicInteger inProgress = new AtomicInteger();
+        AtomicInteger started = new AtomicInteger();
+        when(textTranslationService.translatePageSingleStrategy(any(), any(TargetLanguage.class), eq(false))).thenAnswer(invocation -> {
+            started.incrementAndGet();
+            inProgress.incrementAndGet();
+            try {
+                if (pageOf(invocation.getArgument(0)) == 3) {
+                    throw new IllegalStateException("model error on page 3");
+                }
+                Thread.sleep(2_000);   // a long model call: interrupted when page 3 fails
+                return "page";
+            } finally {
+                inProgress.decrementAndGet();
+            }
+        });
+        long start = System.nanoTime();
+
+        assertThatThrownBy(() -> parallelService("single", 4).translateToText(
+                new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES), "fr"))
+                .isInstanceOf(TranslationProcessingException.class)
+                .hasRootCauseMessage("model error on page 3");
+
+        assertThat(inProgress.get()).as("model calls still running after the failure").isZero();
+        assertThat(started.get()).as("pages started").isLessThan(20);
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofSeconds(2));
+        assertThat(pages.isClosed()).isTrue();
+    }
+
+    @Test
+    void translateToTextStream_parallel_pagesStillEmittedInOrder() throws IOException {
+        when(pdfParser.open(any())).thenReturn(TestDocumentPages.of(5));
+        when(textTranslationService.translatePageSingleStrategyStream(any(), any(TargetLanguage.class))).thenAnswer(invocation -> {
+            int page = pageOf(invocation.getArgument(0));
+            // later pages answer faster than earlier ones
+            return Flux.just("p" + page + "a", "p" + page + "b").delayElements(java.time.Duration.ofMillis(60 - page * 10L));
+        });
+
+        List<Integer> pageOfEachEvent = parallelService("single", 4)
+                .translateToTextStream(new MockMultipartFile("file", "test.pdf", "application/pdf", PDF_BYTES), "fr", null)
+                .map(event -> switch (event) {
+                    case TranslationStreamEvent.Token token -> token.pageNumber();
+                    case TranslationStreamEvent.PageComplete complete -> complete.pageNumber();
+                })
+                .collectList()
+                .block(java.time.Duration.ofSeconds(5));
+
+        assertThat(pageOfEachEvent).containsExactly(1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5);
+    }
+
+    @Test
+    void constructor_invalidPagesInFlight_throwsException() {
+        assertThatThrownBy(() -> parallelService("dual", 0)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void mergeMarkdownPages_multiplePages_joinsWithPageBreakSeparator() {
         String merged = TranslationService.mergeMarkdownPages(List.of("Page 1", "Page 2", "Page 3"));
@@ -757,7 +869,7 @@ class TranslationServiceTest {
         assertThatThrownBy(() -> new TranslationService(
                 List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
-                "dual", "10MB", 20000))
+                "dual", "10MB", 20000, 1))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Duplicate parser mapping for MIME type 'image/png'");
     }

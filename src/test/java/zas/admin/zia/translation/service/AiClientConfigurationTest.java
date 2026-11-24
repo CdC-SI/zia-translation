@@ -88,7 +88,7 @@ class AiClientConfigurationTest {
     @Test
     void chatClientCallsOpenAiCompatibleEndpointUnderV1() {
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         String content = client.prompt().user("hello").call().content();
 
@@ -101,7 +101,7 @@ class AiClientConfigurationTest {
     @Test
     void requestsCarryTheMaxTokensCap() {
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         client.prompt().user("hello").call().content();
 
@@ -115,7 +115,7 @@ class AiClientConfigurationTest {
         responder.set(n -> TOOL_CALL_RESPONSE.formatted(n));
         CountingLookupTool tool = new CountingLookupTool();
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         assertThatThrownBy(() -> client.prompt().user("Les AFam sont versées.").tools(tool).call().content())
                 .isInstanceOf(ToolCallLimitReachedException.class);
@@ -137,7 +137,7 @@ class AiClientConfigurationTest {
                 """.formatted(n));
         CountingLookupTool tool = new CountingLookupTool();
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         StepVerifier.create(client.prompt().user("Les AFam sont versées.").tools(tool).stream().content())
                 .thenConsumeWhile(token -> true)
@@ -150,7 +150,7 @@ class AiClientConfigurationTest {
     void answerCutByMaxTokensCapFails() {
         responder.set(n -> TRUNCATED_RESPONSE);
         ChatClient client = new AiClientConfiguration()
-                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .visionChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         assertThatThrownBy(() -> client.prompt().user("hello").call().content())
                 .isInstanceOf(IncompleteGenerationException.class);
@@ -162,7 +162,7 @@ class AiClientConfigurationTest {
         responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("j", "\"length\"")
                 + "data: [DONE]\n\n");
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         StepVerifier.create(client.prompt().user("hello").stream().content())
                 .expectNext("bon")
@@ -177,7 +177,7 @@ class AiClientConfigurationTest {
         responder.set(n -> STREAM_CHUNK.formatted("bon", "null") + STREAM_CHUNK.formatted("jour", "\"stop\"")
                 + "data: [DONE]\n\n");
         ChatClient client = new AiClientConfiguration()
-                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, ObservationRegistry.NOOP);
+                .llmChatClient(baseUrl(), "test-model", "secret-key", 8192, 2, true, 8, ObservationRegistry.NOOP);
 
         String content = String.join("", client.prompt().user("hello").stream().content().collectList()
                 .block(Duration.ofSeconds(10)));
@@ -187,11 +187,11 @@ class AiClientConfigurationTest {
 
     @Test
     void promptSizeLoggingAdvisorIsAddedOnlyWhenEnabled() {
-        assertThat(AiClientConfiguration.advisors(false))
+        assertThat(AiClientConfiguration.advisors(false, new ConcurrencyLimitAdvisor("test", 8)))
                 .noneMatch(PromptSizeLoggingAdvisor.class::isInstance)
                 .anyMatch(ToolCallLimitAdvisor.class::isInstance)
                 .anyMatch(FinishReasonAdvisor.class::isInstance);
-        assertThat(AiClientConfiguration.advisors(true)).anyMatch(PromptSizeLoggingAdvisor.class::isInstance);
+        assertThat(AiClientConfiguration.advisors(true, new ConcurrencyLimitAdvisor("test", 8))).anyMatch(PromptSizeLoggingAdvisor.class::isInstance);
     }
 
     @Test

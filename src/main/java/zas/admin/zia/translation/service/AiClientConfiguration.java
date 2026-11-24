@@ -30,8 +30,10 @@ class AiClientConfiguration {
             @Value("${zia.internal.vision.max-tokens:8192}") int maxTokens,
             @Value("${zia.translation.glossary.max-tool-calls:2}") int maxToolCalls,
             @Value("${zia.internal.prompt-size-logging.enabled:false}") boolean promptSizeLogging,
+            @Value("${zia.vision.max-concurrent-calls:8}") int maxConcurrentCalls,
             ObservationRegistry observationRegistry) {
-        return buildChatClient(baseUrl, model, apiKey, maxTokens, maxToolCalls, promptSizeLogging, observationRegistry);
+        return buildChatClient(baseUrl, model, apiKey, maxTokens, maxToolCalls, promptSizeLogging,
+                new ConcurrencyLimitAdvisor("VisionConcurrencyLimit", maxConcurrentCalls), observationRegistry);
     }
 
     @Bean("llmChatClient")
@@ -42,12 +44,15 @@ class AiClientConfiguration {
             @Value("${zia.internal.llm.max-tokens:8192}") int maxTokens,
             @Value("${zia.translation.glossary.max-tool-calls:2}") int maxToolCalls,
             @Value("${zia.internal.prompt-size-logging.enabled:false}") boolean promptSizeLogging,
+            @Value("${zia.llm.max-concurrent-calls:8}") int maxConcurrentCalls,
             ObservationRegistry observationRegistry) {
-        return buildChatClient(baseUrl, model, apiKey, maxTokens, maxToolCalls, promptSizeLogging, observationRegistry);
+        return buildChatClient(baseUrl, model, apiKey, maxTokens, maxToolCalls, promptSizeLogging,
+                new ConcurrencyLimitAdvisor("LlmConcurrencyLimit", maxConcurrentCalls), observationRegistry);
     }
 
     private static ChatClient buildChatClient(String baseUrl, String model, String apiKey, int maxTokens,
                                               int maxToolCalls, boolean promptSizeLogging,
+                                              ConcurrencyLimitAdvisor concurrencyLimit,
                                               ObservationRegistry observationRegistry) {
         OpenAiChatOptions options = OpenAiChatOptions.builder()
                 .baseUrl(toOpenAiSdkBaseUrl(baseUrl))
@@ -64,12 +69,12 @@ class AiClientConfiguration {
         // ChatClient runs the tools itself, in its ToolCallingAdvisor: the manager must be given there, not to the model.
         return ChatClient.builder(chatModel, observationRegistry, null, null,
                         ToolCallingAdvisor.builder().toolCallingManager(toolCallingManager(maxToolCalls, observationRegistry)))
-                .defaultAdvisors(advisors(promptSizeLogging))
+                .defaultAdvisors(advisors(promptSizeLogging, concurrencyLimit))
                 .build();
     }
 
-    static List<Advisor> advisors(boolean promptSizeLogging) {
-        List<Advisor> advisors = new ArrayList<>(List.of(new ToolCallLimitAdvisor(), new FinishReasonAdvisor()));
+    static List<Advisor> advisors(boolean promptSizeLogging, ConcurrencyLimitAdvisor concurrencyLimit) {
+        List<Advisor> advisors = new ArrayList<>(List.of(new ToolCallLimitAdvisor(), concurrencyLimit, new FinishReasonAdvisor()));
         if (promptSizeLogging) {
             advisors.add(new PromptSizeLoggingAdvisor());
         }
