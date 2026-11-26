@@ -171,7 +171,7 @@ class PageClassifierTest {
                 .maxRetries(0)
                 .build();
         ChatClient client = ChatClient.create(OpenAiChatModel.builder().options(options).build());
-        return new PageClassifier(client, new VisionImagePreprocessor(256, 0.75f), MAPPER, responseFormat);
+        return new PageClassifier(client, new VisionImagePreprocessor(65_536), MAPPER, responseFormat);
     }
 
     private static BufferedImage pageImage() {

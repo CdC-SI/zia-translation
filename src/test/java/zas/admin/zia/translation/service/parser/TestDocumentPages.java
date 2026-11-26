@@ -1,5 +1,7 @@
 package zas.admin.zia.translation.service.parser;
 
+import zas.admin.zia.translation.service.image.PixelBudget;
+
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -17,6 +19,7 @@ public final class TestDocumentPages implements DocumentPages {
     private final List<BufferedImage> images = new ArrayList<>();
     private final List<PageLayout> layouts = new ArrayList<>();
     private final List<Integer> rendered = Collections.synchronizedList(new ArrayList<>());
+    private final List<PixelBudget> budgets = Collections.synchronizedList(new ArrayList<>());
     private IOException renderFailure;
     private volatile boolean closed;
 
@@ -53,6 +56,11 @@ public final class TestDocumentPages implements DocumentPages {
         return List.copyOf(rendered);
     }
 
+    /** Budgets of the {@link #render} calls, in call order. */
+    public List<PixelBudget> renderBudgets() {
+        return List.copyOf(budgets);
+    }
+
     public boolean isClosed() {
         return closed;
     }
@@ -68,8 +76,9 @@ public final class TestDocumentPages implements DocumentPages {
     }
 
     @Override
-    public BufferedImage render(int index) throws IOException {
+    public BufferedImage render(int index, PixelBudget budget) throws IOException {
         rendered.add(index);
+        budgets.add(budget);
         if (renderFailure != null) {
             throw renderFailure;
         }

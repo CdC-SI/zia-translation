@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.image.ImageScaling;
+import zas.admin.zia.translation.service.image.PixelBudget;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -29,8 +31,9 @@ import java.util.List;
 /**
  * Image uploads. Decoders come from the JDK plus TwelveMonkeys (TIFF, WebP), which registers itself with ImageIO.
  * A multi-page TIFF gives one page per frame; other formats give one page (first frame). Frames are decoded on
- * demand, turned upright according to the EXIF orientation (ImageIO ignores it) and converted to RGB on white
- * (CMYK, grayscale, indexed, alpha). The output PDF page is A4, portrait or landscape like the upright image.
+ * demand, turned upright according to the EXIF orientation (ImageIO ignores it), converted to RGB on white
+ * (CMYK, grayscale, indexed, alpha) and shrunk to the pixel budget by area averaging. The output PDF page is A4,
+ * portrait or landscape like the upright image.
  */
 @Component
 class ImageDocumentParser implements DocumentParser {
@@ -193,9 +196,11 @@ class ImageDocumentParser implements DocumentParser {
         }
 
         @Override
-        public synchronized BufferedImage render(int index) throws IOException {
+        public synchronized BufferedImage render(int index, PixelBudget budget) throws IOException {
             checkSize(frames, index);
-            return toUprightRgb(frames.reader().read(index), orientation);
+            BufferedImage upright = toUprightRgb(frames.reader().read(index), orientation);
+            PixelBudget.Size size = budget.fitImage(upright.getWidth(), upright.getHeight());
+            return ImageScaling.downscale(upright, size.width(), size.height());
         }
 
         @Override

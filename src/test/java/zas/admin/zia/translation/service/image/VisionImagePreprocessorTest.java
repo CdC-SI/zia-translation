@@ -1,17 +1,15 @@
 package zas.admin.zia.translation.service.image;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.ai.content.Media;
 import org.springframework.util.MimeTypeUtils;
 
 import javax.imageio.ImageIO;
+import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,141 +17,86 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class VisionImagePreprocessorTest {
 
-    private final VisionImagePreprocessor preprocessor = new VisionImagePreprocessor(1024, 0.75f);
+    private static final int BLUE = 0x0000FF;
+    private static final int WHITE = 0xFFFFFF;
 
-    @ParameterizedTest
-    @CsvSource({
-            "723.9, 704",
-            "1024, 1024",
-            "1023.9999999999, 1024",
-            "600, 576",
-            "20, 32",
-    })
-    void roundDownToMultiple_roundsDownToNearestMultipleOf32(double input, int expected) {
-        assertThat(VisionImagePreprocessor.roundDownToMultiple(input)).isEqualTo(expected);
+    private final VisionImagePreprocessor preprocessor = new VisionImagePreprocessor(1_000_000);
+
+    @Test
+    void toPng_pageRenderedAtTheBudget_onlyPaddedWithWhite() throws IOException {
+        // an A4 page as PdfDocumentParser renders it at 1 MP
+        BufferedImage output = decode(preprocessor.toPng(createImage(831, 1176)));
+
+        assertThat(output.getWidth()).isEqualTo(832);
+        assertThat(output.getHeight()).isEqualTo(1184);
+        // content kept pixel for pixel at the top left, padding on the right and bottom
+        assertThat(output.getRGB(0, 0) & WHITE).isEqualTo(BLUE);
+        assertThat(output.getRGB(830, 1175) & WHITE).isEqualTo(BLUE);
+        assertThat(output.getRGB(831, 600) & WHITE).isEqualTo(WHITE);
+        assertThat(output.getRGB(400, 1183) & WHITE).isEqualTo(WHITE);
     }
 
     @Test
-    void preprocess_a4At150Dpi_resizesPreservingAspectRatio() throws IOException {
-        assertDimensions(1240, 1754, 704, 1024);
+    void toPng_imageAboveTheBudget_shrunkWithItsRatio() throws IOException {
+        BufferedImage output = decode(preprocessor.toPng(createImage(4032, 3024)));
+
+        assertThat(output.getWidth()).isEqualTo(1152);
+        assertThat(output.getHeight()).isEqualTo(864);
     }
 
     @Test
-    void preprocess_smartphonePhoto_resizesToMaxEdge() throws IOException {
-        assertDimensions(4032, 3024, 1024, 768);
+    void toPng_smallImage_neverEnlarged() throws IOException {
+        BufferedImage output = decode(preprocessor.toPng(createImage(20, 10)));
+
+        assertThat(output.getWidth()).isEqualTo(32);
+        assertThat(output.getHeight()).isEqualTo(32);
+        assertThat(output.getRGB(19, 9) & WHITE).isEqualTo(BLUE);
+        assertThat(output.getRGB(25, 5) & WHITE).isEqualTo(WHITE);
     }
 
     @Test
-    void preprocess_widePanorama_resizesToMaxEdge() throws IOException {
-        assertDimensions(2000, 500, 1024, 256);
+    void toPng_imageAlreadyAtMultiplesOf32_keptAsIs() throws IOException {
+        BufferedImage source = createImage(64, 96);
+
+        assertThat(preprocessor.prepare(source)).isSameAs(source);
+        assertThat(decode(preprocessor.toPng(source)).getWidth()).isEqualTo(64);
     }
 
     @Test
-    void preprocess_imageSmallerThanMaxEdge_roundsDownWithoutEnlarging() throws IOException {
-        assertDimensions(800, 600, 800, 576);
-    }
-
-    @Test
-    void preprocess_imageAtMaxEdge_keepsSameDimensions() throws IOException {
-        assertDimensions(1024, 1024, 1024, 1024);
-    }
-
-    @Test
-    void preprocess_tinyImage_isFlooredToMinimum32() throws IOException {
-        assertDimensions(20, 10, 32, 32);
-    }
-
-    @Test
-    void preprocess_imageWithAlpha_isFlattenedOnWhiteBackground() throws IOException {
+    void toPng_imageWithAlpha_flattenedOnWhite() throws IOException {
         BufferedImage source = new BufferedImage(64, 64, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = source.createGraphics();
-        graphics.setComposite(java.awt.AlphaComposite.Clear);
+        graphics.setComposite(AlphaComposite.Clear);
         graphics.fillRect(0, 0, 64, 64);
         graphics.dispose();
 
-        VisionImagePreprocessor.PreprocessedImage result = preprocessor.preprocess(toPng(source));
-        BufferedImage output = ImageIO.read(new ByteArrayInputStream(result.bytes()));
+        BufferedImage output = decode(preprocessor.toPng(source));
 
-        int rgb = output.getRGB(output.getWidth() / 2, output.getHeight() / 2);
-        Color pixel = new Color(rgb);
-        assertThat(pixel.getRed()).isGreaterThan(240);
-        assertThat(pixel.getGreen()).isGreaterThan(240);
-        assertThat(pixel.getBlue()).isGreaterThan(240);
+        assertThat(output.getRGB(32, 32) & WHITE).isEqualTo(WHITE);
     }
 
     @Test
-    void preprocess_outputIsValidJpeg() throws IOException {
-        BufferedImage source = createImage(100, 100);
-        VisionImagePreprocessor.PreprocessedImage result = preprocessor.preprocess(toPng(source));
+    void toMedia_returnsPngMedia() throws IOException {
+        Media media = preprocessor.toMedia(createImage(100, 100));
 
-        byte[] bytes = result.bytes();
-        assertThat(bytes.length).isGreaterThan(3);
-        assertThat(bytes[0]).isEqualTo((byte) 0xFF);
-        assertThat(bytes[1]).isEqualTo((byte) 0xD8);
-        assertThat(bytes[2]).isEqualTo((byte) 0xFF);
-        assertThat(result.mimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
+        assertThat(media.getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_PNG);
+        byte[] bytes = (byte[]) media.getData();
+        assertThat(decode(bytes).getWidth()).isEqualTo(128);
     }
 
     @Test
-    void preprocess_lowerQualityProducesSmallerOutput() throws IOException {
-        BufferedImage source = createImage(512, 512);
-        byte[] png = toPng(source);
-
-        VisionImagePreprocessor highQuality = new VisionImagePreprocessor(1024, 1.0f);
-        VisionImagePreprocessor lowQuality = new VisionImagePreprocessor(1024, 0.75f);
-
-        int highQualitySize = highQuality.preprocess(png).bytes().length;
-        int lowQualitySize = lowQuality.preprocess(png).bytes().length;
-
-        assertThat(lowQualitySize).isLessThan(highQualitySize);
+    void budget_fromTheConfiguredPixels() {
+        assertThat(preprocessor.budget()).isEqualTo(new PixelBudget(1_000_000));
     }
 
     @Test
-    void preprocess_invalidBytes_throwsImagePreprocessingException() {
-        assertThatThrownBy(() -> preprocessor.preprocess(new byte[]{1, 2, 3}))
-                .isInstanceOf(ImagePreprocessingException.class);
+    void constructor_budgetBelowOneToken_rejected() {
+        assertThatThrownBy(() -> new VisionImagePreprocessor(1023)).isInstanceOf(IllegalArgumentException.class);
     }
 
-    @Test
-    void toMedia_returnsJpegMediaWithPreprocessedBytes() throws IOException {
-        BufferedImage source = createImage(100, 100);
-        Media media = preprocessor.toMedia(toPng(source));
-
-        assertThat(media.getMimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
-    }
-
-    @Test
-    void constructor_maxEdgeBelowMinimum_throwsIllegalArgumentException() {
-        assertThatThrownBy(() -> new VisionImagePreprocessor(31, 0.75f))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void constructor_jpegQualityZero_throwsIllegalArgumentException() {
-        assertThatThrownBy(() -> new VisionImagePreprocessor(1024, 0.0f))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void constructor_jpegQualityAboveOne_throwsIllegalArgumentException() {
-        assertThatThrownBy(() -> new VisionImagePreprocessor(1024, 1.1f))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void constructor_jpegQualityNaN_throwsIllegalArgumentException() {
-        assertThatThrownBy(() -> new VisionImagePreprocessor(1024, Float.NaN))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    private void assertDimensions(int sourceWidth, int sourceHeight, int expectedWidth, int expectedHeight) throws IOException {
-        BufferedImage source = createImage(sourceWidth, sourceHeight);
-        VisionImagePreprocessor.PreprocessedImage result = preprocessor.preprocess(toPng(source));
-        BufferedImage output = ImageIO.read(new ByteArrayInputStream(result.bytes()));
-
-        assertThat(output.getWidth()).isEqualTo(expectedWidth);
-        assertThat(output.getHeight()).isEqualTo(expectedHeight);
-        assertThat(result.mimeType()).isEqualTo(MimeTypeUtils.IMAGE_JPEG);
+    private static BufferedImage decode(byte[] png) throws IOException {
+        assertThat(png[1]).isEqualTo((byte) 'P');   // PNG signature: 0x89 'P' 'N' 'G'
+        return ImageIO.read(new ByteArrayInputStream(png));
     }
 
     private static BufferedImage createImage(int width, int height) {
@@ -163,11 +106,5 @@ class VisionImagePreprocessorTest {
         graphics.fillRect(0, 0, width, height);
         graphics.dispose();
         return image;
-    }
-
-    private static byte[] toPng(BufferedImage image) throws IOException {
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", outputStream);
-        return outputStream.toByteArray();
     }
 }

@@ -13,6 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
+import zas.admin.zia.translation.service.image.PixelBudget;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.util.Collection;
@@ -81,6 +82,11 @@ class PageClassifier {
         this.jsonSchema = VisionFieldExtractor.ResponseFormatMode.parse(responseFormat)
                 == VisionFieldExtractor.ResponseFormatMode.JSON_SCHEMA;
         this.schemaJson = objectMapper.writeValueAsString(schema());
+    }
+
+    /** The budget to render the classified pages at (the translation one: the page type needs no fine detail). */
+    PixelBudget budget() {
+        return imagePreprocessor.budget();
     }
 
     /**

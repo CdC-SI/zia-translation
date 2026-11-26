@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.image.PixelBudget;
 import zas.admin.zia.translation.service.parser.DocumentPages;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.DocumentParserResolver;
@@ -146,7 +147,7 @@ public class ExtractionService {
         List<PageExtraction> extractions = new ArrayList<>(analysed);
         RuntimeException lastFailure = null;
         for (int page = 1; page <= analysed; page++) {
-            BufferedImage image = render(pages, page);   // outside the try: an unreadable page fails the job
+            BufferedImage image = render(pages, page, fieldExtractor.budget());   // outside the try: an unreadable page fails the job
             try {
                 extractions.add(fieldExtractor.extract(image, page, pageCount, request));
             } catch (RuntimeException ex) {
@@ -226,10 +227,13 @@ public class ExtractionService {
         }
     }
 
-    /** Renders one page (from 1) on demand: pages are not kept in memory between the classification and extraction. */
-    private static BufferedImage render(DocumentPages pages, int page) {
+    /**
+     * Renders one page (from 1) on demand, at the budget of the step that sends it: pages are not kept in memory
+     * between the classification and extraction.
+     */
+    private static BufferedImage render(DocumentPages pages, int page, PixelBudget budget) {
         try {
-            return pages.render(page - 1);
+            return pages.render(page - 1, budget);
         } catch (IOException | RuntimeException ex) {
             throw new UnreadableDocumentException("The document cannot be read.", ex);
         }
@@ -266,7 +270,7 @@ public class ExtractionService {
             }
             int current = page;
             List<PageClassification> context = known.values().stream().filter(p -> p.page() != current).toList();
-            PageImage image = new PageImage(page, render(pages, page));
+            PageImage image = new PageImage(page, render(pages, page, pageClassifier.budget()));
             try {
                 ClassifiedPage result = pageClassifier.classify(image, pageCount, request, context);
                 classified.put(page, result);
@@ -289,7 +293,7 @@ public class ExtractionService {
         for (int from = 0; from < toExtract.size(); from += maxImagesPerCall) {
             List<Integer> batch = toExtract.subList(from, Math.min(from + maxImagesPerCall, toExtract.size()));
             List<PageImage> batchImages = batch.stream()
-                    .map(page -> new PageImage(page, render(pages, page)))
+                    .map(page -> new PageImage(page, render(pages, page, fieldExtractor.budget())))
                     .toList();
             try {
                 extractions.add(fieldExtractor.extract(batchImages, pageCount, request, true));

@@ -6,6 +6,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.util.unit.DataSize;
 import tools.jackson.databind.json.JsonMapper;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.image.PixelBudget;
 import zas.admin.zia.translation.service.parser.DocumentParser;
 import zas.admin.zia.translation.service.parser.TestDocumentPages;
 
@@ -393,6 +394,27 @@ class ExtractionServiceTest {
         String jobId = service.submit("key", pdf(PDF), context).jobId();
         scheduled.getFirst().run();
         return service.find(jobId).orElseThrow();
+    }
+
+    @Test
+    void process_classifiedFile_eachStepRendersAtItsOwnBudget() throws IOException {
+        PixelBudget classification = new PixelBudget(1_000_000);
+        PixelBudget extraction = new PixelBudget(2_101_248);
+        when(classifier.budget()).thenReturn(classification);
+        when(extractor.budget()).thenReturn(extraction);
+        TestDocumentPages pages = TestDocumentPages.of(2);
+        when(pdfParser.open(PDF)).thenReturn(pages);
+        when(classifier.classify(any(), anyInt(), any(), any())).thenAnswer(invocation -> classified(
+                invocation.<PageImage>getArgument(0).page(), DocumentRole.MAIN, DocumentType.FORM, "300.001"));
+        when(extractor.extract(any(), eq(2), any(), eq(true)))
+                .thenReturn(new PageExtraction(1, List.of(1, 2), null, Map.of(), Map.of(), List.of()));
+
+        ExtractionJobResponse job = run(classifyingService(20, 4), IV_CONTEXT);
+
+        assertThat(job.status()).isEqualTo(ExtractionStatus.SUCCEEDED);
+        // pages 1 and 2 classified, then rendered again for the extraction call
+        assertThat(pages.renderedPages()).containsExactly(0, 1, 0, 1);
+        assertThat(pages.renderBudgets()).containsExactly(classification, classification, extraction, extraction);
     }
 
     @Test

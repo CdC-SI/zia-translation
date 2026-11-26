@@ -135,8 +135,9 @@ d'ajouter un profil, sans modifier le code.
 
 ### 2.3 Rendu des pages
 
-Le traitement asynchrone commence par le rendu des pages : les PDF sont rendus en images à 150 DPI, les images sont
-prises telles quelles. Seules les `zia.extraction.max-pages` premières pages (20 par défaut) sont analysées, avec un
+Le traitement asynchrone commence par le rendu des pages, au budget de pixels de l'étape qui les envoie
+(`PixelBudget`) : les pages PDF sont rendues directement à l'échelle qui remplit le budget, les images sont réduites
+par moyenne de surface (jamais agrandies). Seules les `zia.extraction.max-pages` premières pages (20 par défaut) sont analysées, avec un
 avertissement si le document en a davantage. Un document illisible ou sans page met le job en échec
 (`UNREADABLE_DOCUMENT`).
 
@@ -149,7 +150,8 @@ la requête contient des `pageHints`, et jamais pour un profil `perPage`. Hypoth
 1. **Hints du client** : une page avec un `pageHint` est reprise telle quelle et n'est pas reclassée. Un hint qui
    porte sur une page non analysée est ignoré, avec un avertissement.
 2. **Classification par le modèle** (`PageClassifier`) : chaque page sans hint fait l'objet d'un appel léger au
-   modèle vision. L'image fait 1024 px au maximum et la réponse est contrainte par un JSON Schema strict.
+   modèle vision. L'image a le budget de la traduction (`zia.translation.vision.preprocessing.max-pixels`,
+   1 000 000 pixels, A4 à ~100 DPI) et la réponse est contrainte par un JSON Schema strict.
    - Le modèle renvoie `title`, `recipient`, `formId`, `printedPageNumber`/`printedPageCount` (« Seite 2 von 2 »),
      `continuesPreviousPage`, `documentRole` (`MAIN`, `SUPPORTING`, `OTHER`), `documentType` (`FORM`, `INVOICE`,
      `QUOTE`, `POWER_OF_ATTORNEY`…), `evidence` et `confidence`.
@@ -180,9 +182,9 @@ La classification finale est renvoyée dans `result.pages`. Les pages non class�
   - Chaque valeur renvoie la `page` où elle a été lue. Une page absente ou invalide est remplacée par la première page
     du lot.
 - **Sans classification** : chaque page est extraite séparément.
-- **Images** : elles sont préparées à une résolution propre à l'extraction (`zia.extraction.vision.max-edge`,
-  1792 px par défaut, JPEG `zia.extraction.vision.jpeg-quality` = 0.9). Cette résolution plus haute permet de lire
-  les cases à cocher et les montants.
+- **Images** : elles sont préparées avec un budget de pixels propre à l'extraction (`zia.extraction.vision.max-pixels`,
+  2 101 248 pixels par défaut, A4 à ~147 DPI), complétées de blanc jusqu'aux multiples de 32 et envoyées en PNG.
+  Cette résolution plus haute permet de lire les cases à cocher et les montants.
 - **Sortie structurée** : un JSON Schema strict est généré à partir des clés demandées (`ExtractionSchemaGenerator`).
   Chaque valeur prend la forme `{value, evidence, confidence, page}` (`page` : page du fichier où la valeur est lue,
   parmi les pages envoyées). Avec `simpleOutput`, seule la valeur brute est demandée. Avec
@@ -234,7 +236,7 @@ répond `404`.
 |---|---|---|
 | `zia.extraction.max-pages` | 20 | Pages analysées au maximum |
 | `zia.extraction.max-images-per-call` | 4 | Images par appel au modèle vision (≤ `--limit-mm-per-prompt`) |
-| `zia.extraction.vision.max-edge` / `jpeg-quality` | 1792 / 0.9 | Résolution des images d'extraction |
+| `zia.extraction.vision.max-pixels` | 2101248 | Pixels d'une image d'extraction (≤ `max_pixels` du serveur vision) |
 | `zia.extraction.response-format` | `json_schema` | `json_schema` (décodage guidé) ou `json_object` |
 | `zia.extraction.max-fields` / `max-instructions-length` | 80 / 2000 | Limites du contexte |
 | `zia.extraction.confidence.no-evidence-cap` / `unmatched-evidence-cap` | 0.3 / 0.5 | Plafonds de confiance |

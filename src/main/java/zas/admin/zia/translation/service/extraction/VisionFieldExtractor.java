@@ -15,6 +15,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
+import zas.admin.zia.translation.service.image.PixelBudget;
 import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 
 import java.awt.image.BufferedImage;
@@ -82,7 +83,7 @@ class VisionFieldExtractor {
     private final ResponseFormatMode responseFormatMode;
 
     /**
-     * The images are prepared with their own resolution: reading small check boxes and amounts of a form needs a
+     * The images are prepared with their own pixel budget: reading small check boxes and amounts of a form needs a
      * higher resolution than the translation.
      */
     @Autowired
@@ -91,9 +92,8 @@ class VisionFieldExtractor {
             ObjectMapper objectMapper,
             ConfidenceCalculator confidenceCalculator,
             @Value("${zia.extraction.response-format:json_schema}") String responseFormat,
-            @Value("${zia.extraction.vision.max-edge:1792}") int maxEdge,
-            @Value("${zia.extraction.vision.jpeg-quality:0.9}") float jpegQuality) {
-        this(visionClient, new VisionImagePreprocessor(maxEdge, jpegQuality), objectMapper, confidenceCalculator,
+            @Value("${zia.extraction.vision.max-pixels:2101248}") long maxPixels) {
+        this(visionClient, new VisionImagePreprocessor(maxPixels), objectMapper, confidenceCalculator,
                 responseFormat);
     }
 
@@ -108,6 +108,11 @@ class VisionFieldExtractor {
         this.objectMapper = objectMapper;
         this.confidenceCalculator = confidenceCalculator;
         this.responseFormatMode = ResponseFormatMode.parse(responseFormat);
+    }
+
+    /** The budget to render the extracted pages at. */
+    PixelBudget budget() {
+        return imagePreprocessor.budget();
     }
 
     /**

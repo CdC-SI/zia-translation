@@ -10,6 +10,7 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.image.ImagePreprocessingException;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.llm.TextTranslationService;
 import zas.admin.zia.translation.service.ocr.OcrExtractionService;
 import zas.admin.zia.translation.service.job.JobOutputFormat;
@@ -67,6 +68,8 @@ class TranslationServiceTest {
     @Mock
     private MarkdownStorageService markdownStorageService;
 
+    private static final VisionImagePreprocessor PREPROCESSOR = new VisionImagePreprocessor(1_000_000);
+
     private TranslationService dualService;
     private TranslationService singleService;
 
@@ -81,12 +84,12 @@ class TranslationServiceTest {
                 "image/bmp"));
 
         dualService = new TranslationService(
-                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 20000, 1);
 
         singleService = new TranslationService(
-                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "single", "10MB", 20000, 1);
     }
@@ -112,7 +115,7 @@ class TranslationServiceTest {
     @Test
     void translateToText_fileTooLarge_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "1KB", 20000, 1);
         byte[] bigContent = new byte[2048];
@@ -353,7 +356,7 @@ class TranslationServiceTest {
     @Test
     void translatePlainText_textTooLong_throwsInvalidDocumentException() {
         TranslationService service = new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 10, 1);
 
@@ -458,7 +461,7 @@ class TranslationServiceTest {
     @Test
     void constructor_invalidStrategyValue_throwsException() {
         assertThatThrownBy(() -> new TranslationService(
-                List.of(pdfParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "invalid-strategy", "10MB", 20000, 1))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -569,7 +572,7 @@ class TranslationServiceTest {
 
     private TranslationService serviceWithExecutor(Executor executor) {
         return new TranslationService(
-                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), executor,
                 "dual", "10MB", 20000, 1);
     }
@@ -695,7 +698,7 @@ class TranslationServiceTest {
 
     private TranslationService parallelService(String strategy, int pagesInFlight) {
         return new TranslationService(
-                List.of(pdfParser, imageParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 strategy, "10MB", 20000, pagesInFlight);
     }
@@ -867,7 +870,7 @@ class TranslationServiceTest {
         when(duplicateParser.supportedMimeTypes()).thenReturn(List.of("image/png"));
 
         assertThatThrownBy(() -> new TranslationService(
-                List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, pdfGenerationService,
+                List.of(pdfParser, imageParser, duplicateParser), ocrService, textTranslationService, PREPROCESSOR, pdfGenerationService,
                 translationJobStore, pdfStorageService, markdownStorageService, new TargetLanguageResolver("fr"), Runnable::run,
                 "dual", "10MB", 20000, 1))
                 .isInstanceOf(IllegalStateException.class)

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import zas.admin.zia.translation.service.InvalidDocumentException;
+import zas.admin.zia.translation.service.image.PixelBudget;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -28,6 +29,8 @@ class ImageDocumentParserTest {
     /** 1x1 lossy WebP (the well-known browser feature-detection sample). */
     private static final byte[] WEBP_1X1 = Base64.getDecoder().decode("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA");
 
+    private static final PixelBudget BUDGET = new PixelBudget(1_000_000);
+
     private final ImageDocumentParser parser = new ImageDocumentParser(50_000_000);
 
     @Test
@@ -45,7 +48,7 @@ class ImageDocumentParserTest {
     void open_png_onePageRenderedAsRgb() throws IOException {
         try (DocumentPages pages = parser.open(createImageBytes("png", 32, 16))) {
             assertThat(pages.pageCount()).isEqualTo(1);
-            BufferedImage page = pages.render(0);
+            BufferedImage page = pages.render(0, BUDGET);
             assertThat(page.getType()).isEqualTo(BufferedImage.TYPE_INT_RGB);
             assertThat(page.getWidth()).isEqualTo(32);
             assertThat(page.getHeight()).isEqualTo(16);
@@ -127,6 +130,15 @@ class ImageDocumentParserTest {
         BufferedImage stored = new BufferedImage(8, 4, BufferedImage.TYPE_INT_RGB);
 
         assertThat(ImageDocumentParser.toUprightRgb(stored, 1)).isSameAs(stored);
+    }
+
+    @Test
+    void render_phonePhoto_shrunkToTheBudgetWithItsRatio() throws IOException {
+        BufferedImage page = renderAll(createImageBytes("jpeg", 3024, 4032)).getFirst();
+
+        assertThat(page.getWidth()).isEqualTo(864);
+        assertThat(page.getHeight()).isEqualTo(1152);
+        assertThat(page.getType()).isEqualTo(BufferedImage.TYPE_INT_RGB);
     }
 
     @Test
@@ -247,7 +259,7 @@ class ImageDocumentParserTest {
         try (DocumentPages pages = parser.open(bytes)) {
             List<BufferedImage> images = new ArrayList<>();
             for (int i = 0; i < pages.pageCount(); i++) {
-                images.add(pages.render(i));
+                images.add(pages.render(i, BUDGET));
             }
             return images;
         }

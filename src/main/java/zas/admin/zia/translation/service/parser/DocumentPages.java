@@ -1,5 +1,7 @@
 package zas.admin.zia.translation.service.parser;
 
+import zas.admin.zia.translation.service.image.PixelBudget;
+
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 
@@ -22,12 +24,15 @@ public interface DocumentPages extends AutoCloseable {
     PageLayout layout(int index);
 
     /**
-     * Renders the page as an RGB image. Nothing is cached: each call renders again.
+     * Renders the page as an RGB image whose size fits the budget once padded ({@link PixelBudget#fitPage} for PDF
+     * pages, rendered directly at that scale; {@link PixelBudget#fitImage} for images, shrunk, never enlarged).
+     * The image is not padded. Nothing is cached: each call renders again.
      *
-     * @param index page index, from 0
+     * @param index  page index, from 0
+     * @param budget pixels of the image sent to the vision model
      * @throws IOException if the page cannot be rendered
      */
-    BufferedImage render(int index) throws IOException;
+    BufferedImage render(int index, PixelBudget budget) throws IOException;
 
     @Override
     void close() throws IOException;

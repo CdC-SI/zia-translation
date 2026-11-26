@@ -136,7 +136,7 @@ class VisionFieldExtractorHttpTest {
                 .maxRetries(0)
                 .build();
         ChatClient client = ChatClient.create(OpenAiChatModel.builder().options(options).build());
-        return new VisionFieldExtractor(client, new VisionImagePreprocessor(256, 0.75f), MAPPER,
+        return new VisionFieldExtractor(client, new VisionImagePreprocessor(65_536), MAPPER,
                 new ConfidenceCalculator(0.3, 0.5), responseFormat);
     }
 

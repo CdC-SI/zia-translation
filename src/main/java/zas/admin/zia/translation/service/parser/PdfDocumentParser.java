@@ -6,6 +6,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.stereotype.Component;
+import zas.admin.zia.translation.service.image.PixelBudget;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -19,7 +20,6 @@ import java.util.List;
 class PdfDocumentParser implements DocumentParser {
 
     private static final List<String> SUPPORTED_MIME_TYPES = List.of("application/pdf");
-    private static final float RENDER_DPI = 150f;
 
     static {
         ImageIoPlugins.removeJaiImageIoCorePlugins();
@@ -35,7 +35,27 @@ class PdfDocumentParser implements DocumentParser {
         return SUPPORTED_MIME_TYPES;
     }
 
-    /** A loaded PDF; pages rendered at {@value #RENDER_DPI} DPI on demand. */
+    /**
+     * Scale (pixels per point) to render a page of this layout at, so that the image fits the budget. PDFBox sizes
+     * the image {@code floor(points x scale)} in float arithmetic, which can exceed the fitted size by one pixel when
+     * the scale is rounded to a float: the scale is lowered to the float just below until it does not.
+     */
+    static float renderScale(PageLayout layout, PixelBudget budget) {
+        PixelBudget.Size size = budget.fitPage(layout.widthPt(), layout.heightPt());
+        float scale = (float) size.scale();
+        while (renderedSide(layout.widthPt(), scale) > size.width()
+                || renderedSide(layout.heightPt(), scale) > size.height()) {
+            scale = Math.nextDown(scale);
+        }
+        return scale;
+    }
+
+    /** Side of the image PDFBox renders (PDFRenderer.renderImage: floor of points x scale, at least 1). */
+    static int renderedSide(float points, float scale) {
+        return (int) Math.max(Math.floor(points * scale), 1);
+    }
+
+    /** A loaded PDF; pages rendered on demand, directly at the scale of the budget (no resize afterwards). */
     private static final class PdfPages implements DocumentPages {
 
         private final PDDocument document;
@@ -62,8 +82,8 @@ class PdfDocumentParser implements DocumentParser {
         }
 
         @Override
-        public synchronized BufferedImage render(int index) throws IOException {
-            return renderer.renderImageWithDPI(index, RENDER_DPI);
+        public synchronized BufferedImage render(int index, PixelBudget budget) throws IOException {
+            return renderer.renderImage(index, renderScale(layout(index), budget));
         }
 
         @Override

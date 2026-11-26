@@ -33,6 +33,7 @@ import reactor.core.scheduler.Schedulers;
 import zas.admin.zia.translation.service.dto.TranslationJobResponse;
 import zas.admin.zia.translation.service.dto.TranslationStreamEvent;
 import zas.admin.zia.translation.service.image.ImagePreprocessingException;
+import zas.admin.zia.translation.service.image.VisionImagePreprocessor;
 import zas.admin.zia.translation.service.job.JobOutputFormat;
 import zas.admin.zia.translation.service.job.JobStatus;
 import zas.admin.zia.translation.service.job.TranslationJob;
@@ -72,11 +73,13 @@ public class TranslationService {
     private final long maxFileSizeBytes;
     private final int maxTextLength;
     private final int pagesInFlight;
+    private final VisionImagePreprocessor imagePreprocessor;
 
     TranslationService(
             List<DocumentParser> parsers,
             OcrExtractionService ocrService,
             TextTranslationService textTranslationService,
+            VisionImagePreprocessor imagePreprocessor,
             PdfGenerationService pdfGenerationService,
             TranslationJobStore translationJobStore,
             PdfStorageService pdfStorageService,
@@ -94,6 +97,8 @@ public class TranslationService {
         this.parserResolver = new DocumentParserResolver(parsers);
         this.ocrService = ocrService;
         this.textTranslationService = textTranslationService;
+        // pages are rendered at the budget of the preprocessor that sends them (OCR and single strategy)
+        this.imagePreprocessor = imagePreprocessor;
         this.pdfGenerationService = pdfGenerationService;
         this.translationJobStore = translationJobStore;
         this.pdfStorageService = pdfStorageService;
@@ -341,9 +346,9 @@ public class TranslationService {
         return layouts;
     }
 
-    private static BufferedImage renderPage(DocumentPages pages, int index) {
+    private BufferedImage renderPage(DocumentPages pages, int index) {
         try {
-            return pages.render(index);
+            return pages.render(index, imagePreprocessor.budget());
         } catch (IOException exception) {
             throw new InvalidDocumentException("Document is invalid or cannot be parsed.", exception);
         }
