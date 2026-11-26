@@ -37,7 +37,7 @@ public final class DocumentParserResolver {
      * Returns the parser of the document, after the parser has checked that it can process it.
      *
      * @throws InvalidDocumentException unknown or unsupported format, or a document the parser rejects
-     *                                  (e.g. image too large, PDF with JPEG 2000 images)
+     *                                  (e.g. image too large)
      */
     public DocumentParser resolve(byte[] documentBytes) {
         String mimeType = detectMimeType(documentBytes);

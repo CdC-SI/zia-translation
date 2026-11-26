@@ -1,24 +1,19 @@
 package zas.admin.zia.translation.service.parser;
 
-import org.apache.pdfbox.cos.COSArray;
-import org.apache.pdfbox.cos.COSBase;
-import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.graphics.color.PDDeviceGray;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.junit.jupiter.api.Test;
-import zas.admin.zia.translation.service.InvalidDocumentException;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.OutputStream;
-
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
@@ -31,87 +26,51 @@ class PdfDocumentParserTest {
     private final PdfDocumentParser parser = new PdfDocumentParser();
 
     @Test
-    void validate_pdfWithJpeg2000Image_rejected() throws IOException {
-        byte[] pdf = pdfWithImage(COSName.JPX_DECODE, false);
+    void render_jpeg2000Image_isDecoded() throws IOException {
+        // a black square drawn at (100, 100)-(300, 300) pt, as a JPXDecode image like "high compression" scans
+        try (DocumentPages pages = parser.open(pdfWithBlackJpeg2000Square())) {
+            BufferedImage page = pages.render(0);
 
-        assertThatThrownBy(() -> parser.validate(pdf))
-                .isInstanceOf(InvalidDocumentException.class)
-                .hasMessageContaining("JPEG 2000");
+            assertThat(gray(page, 200, 200)).isLessThan(40);
+            assertThat(gray(page, 400, 600)).isGreaterThan(215);
+        }
     }
 
     @Test
-    void validate_jpeg2000ImageNestedInFormXObject_rejected() throws IOException {
-        assertThatThrownBy(() -> parser.validate(pdfWithImage(COSName.JPX_DECODE, true)))
-                .isInstanceOf(InvalidDocumentException.class);
+    void validate_pdfWithJpeg2000Image_accepted() throws IOException {
+        parser.validate(pdfWithBlackJpeg2000Square());
     }
 
     @Test
-    void validate_jpeg2000InFilterArray_rejected() throws IOException {
-        COSArray filters = new COSArray();
-        filters.add(COSName.FLATE_DECODE);
-        filters.add(COSName.JPX_DECODE);
-
-        assertThatThrownBy(() -> parser.validate(pdfWithImage(filters, false)))
-                .isInstanceOf(InvalidDocumentException.class);
-    }
-
-    @Test
-    void validate_pdfWithOtherImages_accepted() throws IOException {
-        parser.validate(pdfWithImage(COSName.DCT_DECODE, false));
-        parser.validate(pdfWithImage(COSName.JBIG2_DECODE, true));
-        parser.validate(createMinimalPdf(2));
-    }
-
-    @Test
-    void validate_unreadableBytes_leftToRendering() {
-        parser.validate("%PDF-1.7 truncated".getBytes());
-    }
-
-    @Test
-    void jbig2DecoderIsOnTheClasspath() {
-        // PDFBox renders JBIG2 scans only when this ImageIO plugin is present (otherwise: blank image, warning)
+    void jbig2AndJpeg2000DecodersAreOnTheClasspath() {
+        // PDFBox renders JBIG2 and JPEG 2000 scans only when these ImageIO plugins are present (otherwise: blank image)
         assertThat(ImageIO.getImageReadersByFormatName("JBIG2").hasNext()).isTrue();
+        assertThat(ImageIO.getImageReadersByFormatName("JPEG2000").hasNext()).isTrue();
     }
 
-    /** A one-page PDF with a 1x1 image XObject using the given filter (not decodable: only the dictionary matters). */
-    private static byte[] pdfWithImage(COSBase filter, boolean nestedInForm) throws IOException {
+    /** Gray level (0 black, 255 white) at a point given in PDF points from the bottom-left of an A4 page at 150 DPI. */
+    private static int gray(BufferedImage page, float xPt, float yPt) {
+        int x = Math.round(xPt * 150 / 72);
+        int y = Math.round((PDRectangle.A4.getHeight() - yPt) * 150 / 72);
+        return page.getRaster().getSample(x, y, 1);
+    }
+
+    private static byte[] pdfWithBlackJpeg2000Square() throws IOException {
+        BufferedImage black = new BufferedImage(64, 64, BufferedImage.TYPE_BYTE_GRAY);
+        ByteArrayOutputStream jpx = new ByteArrayOutputStream();
+        assertThat(ImageIO.write(black, "JPEG2000", jpx)).isTrue();
         try (PDDocument document = new PDDocument()) {
-            COSStream image = document.getDocument().createCOSStream();
-            image.setItem(COSName.TYPE, COSName.XOBJECT);
-            image.setItem(COSName.SUBTYPE, COSName.IMAGE);
-            image.setItem(COSName.FILTER, filter);
-            image.setInt(COSName.WIDTH, 1);
-            image.setInt(COSName.HEIGHT, 1);
-            image.setInt(COSName.BITS_PER_COMPONENT, 8);
-            try (OutputStream out = image.createRawOutputStream()) {
-                out.write(new byte[]{0});
-            }
-            COSStream target = image;
-            if (nestedInForm) {
-                COSStream form = document.getDocument().createCOSStream();
-                form.setItem(COSName.TYPE, COSName.XOBJECT);
-                form.setItem(COSName.SUBTYPE, COSName.FORM);
-                form.setItem(COSName.RESOURCES, xObjects("Im1", image));
-                try (OutputStream out = form.createOutputStream()) {
-                    out.write("/Im1 Do".getBytes());
-                }
-                target = form;
-            }
+            PDImageXObject image = new PDImageXObject(document, new ByteArrayInputStream(jpx.toByteArray()),
+                    COSName.JPX_DECODE, 64, 64, 8, PDDeviceGray.INSTANCE);
             PDPage page = new PDPage(PDRectangle.A4);
-            page.setResources(new PDResources(xObjects("X1", target)));
             document.addPage(page);
+            try (PDPageContentStream content = new PDPageContentStream(document, page)) {
+                content.drawImage(image, 100, 100, 200, 200);
+            }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             document.save(out);
             return out.toByteArray();
         }
-    }
-
-    private static COSDictionary xObjects(String name, COSStream stream) {
-        COSDictionary xObjects = new COSDictionary();
-        xObjects.setItem(COSName.getPDFName(name), stream);
-        COSDictionary resources = new COSDictionary();
-        resources.setItem(COSName.XOBJECT, xObjects);
-        return resources;
     }
 
     @Test

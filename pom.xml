@@ -66,12 +66,19 @@
             <artifactId>pdfbox</artifactId>
             <version>3.0.4</version>
         </dependency>
-        <!-- JBIG2 decoder for scanned PDFs (Apache 2.0). JPEG 2000 (jai-imageio-jpeg2000) is deliberately NOT added:
-             custom JJ2000 licence + unmaintained; PDFs with JPX images are rejected instead. -->
+        <!-- JBIG2 decoder for scanned PDFs (Apache 2.0) -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>jbig2-imageio</artifactId>
             <version>3.0.4</version>
+        </dependency>
+        <!-- JPEG 2000 decoder for scanned PDFs (JPXDecode images, e.g. "high compression" PDFs of HP multifunction
+             printers). Licences: JJ2000 + BSD 3-clause (Sun), not Apache 2.0, which is why PDFBox does not ship it.
+             Last release 2020. -->
+        <dependency>
+            <groupId>com.github.jai-imageio</groupId>
+            <artifactId>jai-imageio-jpeg2000</artifactId>
+            <version>1.4.0</version>
         </dependency>
 
         <!-- Document type detection from the file bytes (detection only, no parsers) -->

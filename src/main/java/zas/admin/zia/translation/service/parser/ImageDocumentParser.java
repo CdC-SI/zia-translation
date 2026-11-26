@@ -46,6 +46,10 @@ class ImageDocumentParser implements DocumentParser {
             "image/tiff",
             "image/webp");
 
+    static {
+        ImageIoPlugins.removeJaiImageIoCorePlugins();
+    }
+
     private final long maxPixels;
 
     ImageDocumentParser(@Value("${zia.translation.image.max-pixels:50000000}") long maxPixels) {

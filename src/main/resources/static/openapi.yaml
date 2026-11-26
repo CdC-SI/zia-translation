@@ -41,8 +41,8 @@ paths:
         '400':
           description: >
             Bad request — missing file, empty file, unknown strategy value, or unsupported document: format not
-            recognized from the file content, HEIC/HEIF/AVIF image, image above `zia.translation.image.max-pixels`,
-            or PDF containing JPEG 2000 images
+            recognized from the file content, HEIC/HEIF/AVIF image, or image above
+            `zia.translation.image.max-pixels`
           content:
             application/json:
               schema:
@@ -144,8 +144,8 @@ paths:
         '400':
           description: >
             Bad request — missing file, empty file, unknown strategy value, or unsupported document: format not
-            recognized from the file content, HEIC/HEIF/AVIF image, image above `zia.translation.image.max-pixels`,
-            or PDF containing JPEG 2000 images
+            recognized from the file content, HEIC/HEIF/AVIF image, or image above
+            `zia.translation.image.max-pixels`
           content:
             application/json:
               schema:
@@ -258,8 +258,8 @@ paths:
         '400':
           description: >
             Bad request — missing file, empty file, unknown strategy value, or unsupported document: format not
-            recognized from the file content, HEIC/HEIF/AVIF image, image above `zia.translation.image.max-pixels`,
-            or PDF containing JPEG 2000 images
+            recognized from the file content, HEIC/HEIF/AVIF image, or image above
+            `zia.translation.image.max-pixels`
           content:
             application/json:
               schema:
